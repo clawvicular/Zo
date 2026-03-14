@@ -1,0 +1,17 @@
+{
+  "generated_at": "2026-03-13T03:57:39.304Z",
+  "native": {
+    "last_source_at": null,
+    "last_daily_note_at": null,
+    "stale": true,
+    "daily_note_stale": true
+  },
+  "vault": {
+    "last_built_at": "2026-03-13T03:57:39.304Z",
+    "stale": false
+  },
+  "manual_protection": {
+    "ok": true,
+    "issues": []
+  }
+}
