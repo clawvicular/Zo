@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Activity, Brain, Plus, Play, Square, Terminal, Settings, Cpu, Wrench, Zap, Timer, Pause, RotateCw, Target, TrendingUp } from "lucide-react";
+import { Activity, Brain, Plus, Play, Square, Terminal, Cpu, Wrench, Zap, Timer } from "lucide-react";
 
 const AUTO_CYCLE_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
@@ -21,10 +21,12 @@ export default function AutoResearch() {
     return () => clearInterval(interval);
   }, []);
 
-  // Restore auto-cycle state from server on mount
+  // Restore auto-cycle state from server on first load
+  const hasRestoredRef = useRef(false);
   useEffect(() => {
-    if (metaState?.auto_cycle_active && !autoCycleActive) {
-      startAutoCycle();
+    if (metaState?.auto_cycle_active && !autoCycleActive && !hasRestoredRef.current) {
+      hasRestoredRef.current = true;
+      startAutoCycle(true); // skipPersist=true since server already knows
     }
   }, [metaState?.auto_cycle_active]);
 
@@ -89,18 +91,20 @@ export default function AutoResearch() {
     }
   }, [addLog]);
 
-  const startAutoCycle = useCallback(() => {
+  const startAutoCycle = useCallback((skipPersist = false) => {
     if (autoCycleRef.current) return;
 
     setAutoCycleActive(true);
     addLog("Auto-experiment loop STARTED (5-minute cycles)");
 
-    // Persist to server
-    fetch("/api/meta-improve", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "toggle_auto" })
-    }).catch(() => {});
+    // Persist to server (unless restoring from server state)
+    if (!skipPersist) {
+      fetch("/api/meta-improve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "set_auto", value: true })
+      }).catch(() => {});
+    }
 
     // Run first cycle immediately
     runAutoCycle();
@@ -135,7 +139,7 @@ export default function AutoResearch() {
     fetch("/api/meta-improve", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "toggle_auto" })
+      body: JSON.stringify({ action: "set_auto", value: false })
     }).catch(() => {});
   }, [addLog]);
 
@@ -233,7 +237,7 @@ export default function AutoResearch() {
           <div className="flex items-center gap-4 mb-4">
             {!autoCycleActive ? (
               <button
-                onClick={startAutoCycle}
+                onClick={() => startAutoCycle()}
                 className="px-6 py-3 bg-green-600 rounded-lg hover:bg-green-500 flex items-center gap-2 font-semibold transition-colors"
               >
                 <Play className="w-5 h-5" /> Start Auto-Evolution

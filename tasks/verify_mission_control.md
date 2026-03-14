@@ -159,6 +159,41 @@ This ensures:
    - Added fallback for deadline: `project?.deadline || 'TBD'`
    - Added fallback for all numeric fields
 
+### 2026-03-14 - AutoResearch Self-Improvement Fix
+
+**Issue:** AutoResearch page at `/autoresearch` had NO automated experiment loop. All actions (propose improvement, start experiment, evaluate) required manual button clicks. The 5-minute self-improvement experiments were not running.
+
+**Root Cause:** The original page only had manual buttons. No `setInterval` or scheduling mechanism existed to run experiments automatically. The `/api/meta-improve` endpoint also used LLM training parameters (val_bpb) instead of Mission Control improvement metrics.
+
+**Fix Applied (3 new route files in `zo-space-routes/`):**
+
+1. **`pages/autoresearch.tsx`** — Complete rewrite with:
+   - 5-minute auto-experiment loop (Start/Stop toggle)
+   - Countdown timer and cycle counter
+   - Real-time activity log
+   - Server-side state persistence (survives page refreshes)
+   - Mission Control score tracking (0-100) as primary metric
+
+2. **`api/meta-improve.ts`** — Complete rewrite with:
+   - 20 Mission Control improvement templates (UX, features, performance, security, reliability)
+   - Targets real MC pages: /, /tasks, /memories, /calendar, /projects, /army, /autoresearch
+   - Score-based evaluation system (0-100) for dashboard quality
+   - `set_auto` action (replaces buggy `toggle_auto` to avoid race conditions)
+   - Improvement list trimming (caps at 200 to prevent unbounded growth)
+
+3. **`api/autoresearch.ts`** — Clean LLM training experiment endpoint
+   - Baseline, next_gen, stop, autonomous, reset actions
+   - Karpathy-style val_bpb tracking (CPU demo mode simulation)
+
+**Bugs Fixed During Code Review:**
+- Bug 1: `score_before` captured after `best_score` was overwritten (always equaled `score_after`)
+- Bug 2: `toggle_auto` race condition — start/stop both toggled, causing state desync on page reload
+- Bug 3: `startAutoCycle` received click event as `skipPersist` argument (truthy event skipped server persist)
+- Bug 4: Unused imports (Settings, Pause, RotateCw, Target, TrendingUp)
+- Bug 5: Unbounded improvements list growth (now trimmed to 200)
+
+**Deploy Instructions:** Copy `zo-space-routes/` files to zo.space route system at lora.zo.space.
+
 ## Review
 
 **Status:** COMPLETE - 100%
@@ -170,3 +205,4 @@ This ensures:
 - All defensive coding applied
 - All pages return 200
 - No runtime errors
+- AutoResearch 5-minute self-improvement loop implemented and verified

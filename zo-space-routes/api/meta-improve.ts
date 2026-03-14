@@ -191,16 +191,23 @@ async function runAutoCycle(): Promise<{ success: boolean; result: string; exper
   state.total_cycles++;
 
   if (result.improved) {
+    imp.score_before = state.best_score;
+    imp.score_after = result.score;
     state.best_score = result.score;
     imp.status = "completed";
     imp.result = result.description;
-    imp.score_before = result.score - (result.score - state.best_score);
-    imp.score_after = result.score;
   } else {
     imp.status = "failed";
     imp.result = result.description;
   }
   imp.completed_at = Date.now();
+
+  // Trim old completed/failed improvements to prevent unbounded growth
+  if (improvements.length > 200) {
+    const active = improvements.filter(i => i.status === "proposed" || i.status === "in_progress");
+    const finished = improvements.filter(i => i.status === "completed" || i.status === "failed");
+    improvements = [...active, ...finished.slice(-150)];
+  }
 
   await saveImprovements(improvements);
   await saveState(state);
@@ -275,10 +282,11 @@ export default async function handler(c: Context) {
       return c.json(result);
     }
 
-    // Toggle the auto-cycle flag (the frontend uses this to persist auto-run state)
-    if (action === "toggle_auto") {
+    // Set the auto-cycle flag explicitly (avoids toggle race conditions)
+    if (action === "set_auto") {
+      const { value } = body;
       const state = await getState();
-      state.auto_cycle_active = !state.auto_cycle_active;
+      state.auto_cycle_active = !!value;
       await saveState(state);
       return c.json({ success: true, auto_cycle_active: state.auto_cycle_active });
     }

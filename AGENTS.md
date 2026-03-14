@@ -297,6 +297,12 @@ Core Principles
 - **Content**: Checked for pending communications tasks - none found. No email drafts, no social media posts queued, Gmail not connected so cannot check inbox. CommBot running normally with 6 active tasks.
 - **Tags**: #comm #check #status
 
+### 2026-03-14 05:00:00
+- **Agent**: BuildBot
+- **Type**: bug_fix
+- **Content**: Fixed AutoResearch self-improvement loop - the /autoresearch page had NO automated 5-minute experiment cycle. All actions were manual button clicks. Rewrote all 3 route files: (1) autoresearch.tsx with auto-experiment loop (start/stop, countdown timer, activity log, server persistence), (2) meta-improve.ts rewritten to target Mission Control improvements (20 templates across UX, features, performance, security, reliability) instead of LLM training metrics, (3) autoresearch.ts as clean LLM training endpoint. Fixed 5 additional bugs: score_before ordering, toggle_auto race condition (replaced with set_auto), click event passed as skipPersist, unused imports, unbounded improvements list. Route files in zo-space-routes/ ready for deploy.
+- **Tags**: #bug-fix #autoresearch #meta-improve #self-improvement #mission-control
+
 ### 2026-03-13 09:00:00
 - **Agent**: BuildBot
 - **Type**: bug_fix
