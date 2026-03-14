@@ -20,37 +20,14 @@ export default function AutoResearch() {
   const nextRef = useRef(0);
   const restoredRef = useRef(false);
 
-  // Fetch both APIs independently — one failing doesn't break the other
+  // Fetch both APIs in parallel — one failing doesn't break the other
   const fetchState = useCallback(async () => {
-    try {
-      const res = await fetch("/api/meta-improve");
-      if (res.ok) setMetaState(await res.json());
-    } catch {}
-    try {
-      const res = await fetch("/api/autoresearch");
-      if (res.ok) setLlmState(await res.json());
-    } catch {}
-  }, []);
-
-  useEffect(() => {
-    fetchState();
-    const id = setInterval(fetchState, 5000);
-    return () => clearInterval(id);
-  }, [fetchState]);
-
-  // Restore auto-cycle from server state
-  useEffect(() => {
-    if (metaState?.auto_cycle_active && !autoActive && !restoredRef.current) {
-      restoredRef.current = true;
-      startLoop(true);
-    }
-  }, [metaState?.auto_cycle_active]);
-
-  useEffect(() => {
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-      if (tickRef.current) clearInterval(tickRef.current);
-    };
+    const [metaRes, llmRes] = await Promise.allSettled([
+      fetch("/api/meta-improve").then(r => r.ok ? r.json() : null),
+      fetch("/api/autoresearch").then(r => r.ok ? r.json() : null),
+    ]);
+    if (metaRes.status === "fulfilled" && metaRes.value) setMetaState(metaRes.value);
+    if (llmRes.status === "fulfilled" && llmRes.value) setLlmState(llmRes.value);
   }, []);
 
   const log = useCallback((msg: string) => {
@@ -71,7 +48,7 @@ export default function AutoResearch() {
         const icon = data.experiment?.improved ? "+" : "-";
         log(`[${icon}] ${data.improvement?.name} -> ${data.improvement?.target}`);
         log("    " + data.result);
-        if (data.experiment?.improved) {
+        if (data.experiment?.improved && data.experiment?.score != null) {
           log("    Score: " + data.experiment.score.toFixed(1));
         }
       } else {
@@ -126,6 +103,29 @@ export default function AutoResearch() {
       body: JSON.stringify({ action: "set_auto", value: false }),
     }).catch(() => {});
   }, [log]);
+
+  // Polling
+  useEffect(() => {
+    fetchState();
+    const id = setInterval(fetchState, 5000);
+    return () => clearInterval(id);
+  }, [fetchState]);
+
+  // Restore auto-cycle from server state
+  useEffect(() => {
+    if (metaState?.auto_cycle_active && !autoActive && !restoredRef.current) {
+      restoredRef.current = true;
+      startLoop(true);
+    }
+  }, [metaState?.auto_cycle_active, autoActive, startLoop]);
+
+  // Cleanup timers on unmount
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+      if (tickRef.current) clearInterval(tickRef.current);
+    };
+  }, []);
 
   const metaAction = async (action: string, extra = {}) => {
     setLoading(true);
@@ -328,10 +328,16 @@ export default function AutoResearch() {
             <h2 style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>Experiment History</h2>
           </div>
           <div style={{ maxHeight: 320, overflowY: "auto" }}>
-            {metaState?.improvements
-              ?.filter((i: any) => i.status === "completed" || i.status === "failed")
-              ?.slice(-20).reverse()
-              .map((imp: any) => (
+            {(() => {
+              const finished = metaState?.improvements?.filter((i: any) => i.status === "completed" || i.status === "failed") || [];
+              if (finished.length === 0) {
+                return (
+                  <div style={{ color: "#71717a", textAlign: "center", padding: 32 }}>
+                    No experiments yet. Hit "Start Auto-Evolution" above!
+                  </div>
+                );
+              }
+              return finished.slice(-20).reverse().map((imp: any) => (
                 <div key={imp.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: 12, background: "#27272a", borderRadius: 8, marginBottom: 8, fontSize: 13 }}>
                   <span style={{
                     padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 500,
@@ -344,11 +350,8 @@ export default function AutoResearch() {
                   <span style={{ fontSize: 11, background: "#3f3f46", padding: "2px 6px", borderRadius: 4 }}>{imp.category}</span>
                   <span style={{ color: "#71717a", fontSize: 11 }}>{imp.target}</span>
                 </div>
-              )) || (
-              <div style={{ color: "#71717a", textAlign: "center", padding: 32 }}>
-                No experiments yet. Hit "Start Auto-Evolution" above!
-              </div>
-            )}
+              ));
+            })()}
           </div>
         </div>
 
@@ -377,15 +380,15 @@ export default function AutoResearch() {
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12 }}>
             {[
-              { label: "Baseline", action: "baseline", icon: Play, bg: "#2563eb" },
-              { label: "Next Gen", action: "next_gen", icon: Plus, bg: "#16a34a" },
-              { label: "Stop", action: "stop", icon: Square, bg: "#dc2626" },
-              { label: "Auto (10)", action: "autonomous", extra: { count: 10 }, icon: Zap, bg: "#7c3aed" },
-              { label: "Auto (100)", action: "autonomous", extra: { count: 100 }, icon: Activity, bg: "#6d28d9" },
+              { label: "Baseline", action: "baseline", icon: Play, bg: "#2563eb", extra: {} as any },
+              { label: "Next Gen", action: "next_gen", icon: Plus, bg: "#16a34a", extra: {} as any },
+              { label: "Stop", action: "stop", icon: Square, bg: "#dc2626", extra: {} as any },
+              { label: "Auto (10)", action: "autonomous", icon: Zap, bg: "#7c3aed", extra: { count: 10 } as any },
+              { label: "Auto (100)", action: "autonomous", icon: Activity, bg: "#6d28d9", extra: { count: 100 } as any },
             ].map((btn, i) => {
               const Icon = btn.icon;
               return (
-                <button key={i} onClick={() => llmAction(btn.action, btn.extra || {})} disabled={loading}
+                <button key={i} onClick={() => llmAction(btn.action, btn.extra)} disabled={loading}
                   style={{ padding: "8px 12px", background: btn.bg, borderRadius: 8, border: "none", color: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, fontSize: 13, opacity: loading ? 0.5 : 1 }}>
                   <Icon size={14} /> {btn.label}
                 </button>
