@@ -67,6 +67,16 @@ parse_json() {
     fi
 }
 
+# Escape string for safe JSON embedding
+json_escape() {
+    local str="$1"
+    str="${str//\\/\\\\}"
+    str="${str//\"/\\\"}"
+    str="${str//$'\n'/\\n}"
+    str="${str//$'\t'/\\t}"
+    echo "$str"
+}
+
 # Commands
 case "${1:-}" in
     hot)
@@ -89,11 +99,13 @@ case "${1:-}" in
         ;;
     reply)
         post_id="$2"
-        content="$3"
+        shift 2 2>/dev/null
+        content="$*"
         if [[ -z "$post_id" || -z "$content" ]]; then
             echo "Usage: moltbook reply POST_ID CONTENT"
             exit 1
         fi
+        content=$(json_escape "$content")
         echo "Posting reply..."
         api_call POST "/posts/${post_id}/comments" "{\"content\":\"${content}\"}"
         ;;
@@ -105,6 +117,8 @@ case "${1:-}" in
             echo "Usage: moltbook create TITLE CONTENT [SUBMOLT_ID]"
             exit 1
         fi
+        title=$(json_escape "$title")
+        content=$(json_escape "$content")
         echo "Creating post..."
         api_call POST "/posts" "{\"title\":\"${title}\",\"content\":\"${content}\",\"submolt_id\":\"${submolt}\"}"
         ;;

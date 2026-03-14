@@ -1,11 +1,12 @@
 """EvoChat Dashboard - HTML dashboard generator"""
+import time
 import json
 from datetime import timedelta
 from typing import Dict, Any, Optional, List
 
 def update_dashboard(state: Dict[str, Any], result: Optional[Any] = None) -> str:
     """Generate an interactive HTML dashboard."""
-    elapsed = time.monotonic() - state["start_time"]
+    elapsed = time.time() - state["start_time"]
     remaining = max(0, state["max_seconds"] - elapsed)
     
     results = state.get("results", [])
@@ -182,5 +183,3 @@ def update_dashboard(state: Dict[str, Any], result: Optional[Any] = None) -> str
         f.write(html)
     
     return "EvoChat_Dashboard.html"
-
-import time

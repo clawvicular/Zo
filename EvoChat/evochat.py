@@ -24,13 +24,13 @@ def run(user_msg: str = None):
             user_msg = "build me a viral TikTok idea generator that actually makes money, 1 hour max session, 5 minute experiments"
         
         state["goal"], state["max_seconds"], state["exp_seconds"] = parse_time_params(user_msg)
-        state["start_time"] = time.monotonic()
+        state["start_time"] = time.time()
         save_state(state)
         print(f"Starting EvoChat with goal: {state['goal']}")
         print(f"Max session: {state['max_seconds']}s, Experiment: {state['exp_seconds']}s")
     
     # Check time limit
-    elapsed = time.monotonic() - state["start_time"]
+    elapsed = time.time() - state["start_time"]
     if elapsed >= state["max_seconds"]:
         print("Session time limit reached! Final products ready.")
         update_dashboard(state)
@@ -63,7 +63,7 @@ def run(user_msg: str = None):
     save_state(state)
     update_dashboard(state, result)
     
-    remaining = state["max_seconds"] - (time.monotonic() - state["start_time"])
+    remaining = state["max_seconds"] - (time.time() - state["start_time"])
     print(f"Experiment {state['iterations']} complete. Time left: {int(remaining)}s")
 
 if __name__ == "__main__":

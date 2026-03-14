@@ -9,12 +9,12 @@ from evochat_core import ExperimentResult, ARTIFACTS_DIR
 
 def run_experiment(scaffolding: str, goal: str, exp_seconds: int, iteration: int) -> ExperimentResult:
     """Run a single experiment iteration."""
-    start_exp = time.monotonic()
+    start_exp = time.time()
     
     ideas = generate_ideas(goal, scaffolding, iteration)
     score = evaluate_ideas(ideas, goal)
     
-    runtime = time.monotonic() - start_exp
+    runtime = time.time() - start_exp
     actual_work_time = min(2, exp_seconds)
     time.sleep(max(0, actual_work_time - runtime))
     
@@ -23,7 +23,7 @@ def run_experiment(scaffolding: str, goal: str, exp_seconds: int, iteration: int
     return ExperimentResult(
         iteration=iteration + 1,
         score=score,
-        runtime=time.monotonic() - start_exp,
+        runtime=time.time() - start_exp,
         artifact_path=artifact_path,
         timestamp=time.strftime("%Y-%m-%d %H:%M:%S"),
         goal=goal,

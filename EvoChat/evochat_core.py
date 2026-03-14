@@ -30,7 +30,7 @@ def load_state() -> Dict[str, Any]:
         with open(STATE_FILE) as f:
             return json.load(f)
     return {
-        "start_time": time.monotonic(),
+        "start_time": time.time(),
         "max_seconds": 3600,
         "exp_seconds": 300,
         "best_score": 0,
@@ -65,9 +65,9 @@ def parse_time_params(user_input: str) -> tuple:
     if exp_match:
         exp_min = int(exp_match.group(1))
     
-    # Extract clean goal - remove time params
-    goal = re.sub(r'(,\s*)?(\d+\s*(?:hour|hr|min).*?(?:max|session|experiment|exp))', '', goal, flags=re.I).strip()
-    goal = re.sub(r'^\d+\s*(?:hour|hr|min).*?(?:max|session|experiment|exp)[,\s]*', '', goal, flags=re.I).strip()
+    # Extract clean goal - remove time param clauses (comma-delimited segments with time words)
+    goal = re.sub(r',\s*\d+\s*(?:hour|hr|min)\w*[^,]*', '', goal, flags=re.I).strip()
+    goal = re.sub(r'^\d+\s*(?:hour|hr|min)\w*[^,]*,?\s*', '', goal, flags=re.I).strip()
     goal = goal.strip('.,;:')
     
     return goal, max_min * 60, exp_min * 60
