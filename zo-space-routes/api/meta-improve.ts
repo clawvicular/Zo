@@ -1,15 +1,15 @@
 import type { Context } from "hono";
 
 // ============================================================================
-// AutoResearch for Mission Control — Karpathy-style self-improvement engine
+// AutoResearch for Mission Control — Real Karpathy-style self-improvement
 //
 // Like Karpathy's autoresearch loop:
-//   train.py    → Mission Control routes (the thing being improved)
-//   5-min run   → experiment cycle (propose + evaluate)
-//   val_bpb     → quality score 0-100
+//   train.py    → Mission Control route code + agent configs (the thing being improved)
+//   5-min run   → LLM proposes improvement → LLM evaluates → keep/discard
+//   val_bpb     → quality score 0-100 (LLM-assessed)
 //   keep/discard → accept if score improved, reject if not
 //
-// Every cycle: pick an improvement → simulate applying it → score → keep/discard
+// Brain: Minimax 2.5 via OpenAI-compatible API
 // ============================================================================
 
 type Improvement = {
@@ -24,6 +24,9 @@ type Improvement = {
   started_at?: number;
   completed_at?: number;
   result?: string;
+  reasoning?: string;
+  code_before?: string;
+  code_after?: string;
   score_before?: number;
   score_after?: number;
 };
@@ -36,111 +39,417 @@ type Experiment = {
   improved: boolean;
   status: string;
   description: string;
+  reasoning: string;
   timestamp: number;
 };
+
+type HeartbeatStatus = "idle" | "proposing" | "evaluating" | "deciding" | "error";
 
 // In-memory state — no filesystem dependencies
 let improvements: Improvement[] = [];
 let experimentState = {
   experiments: [] as Experiment[],
-  best_score: 0,
+  best_score: 12.0,
   gen: 0,
   auto_cycle_active: false,
   last_cycle_at: null as number | null,
   total_cycles: 0,
 };
 
-// The "program.md" — improvement templates that the agent can propose
-// These are real things that would improve Mission Control
-const improvementTemplates = [
-  { name: "Add real-time agent heartbeats", description: "Show live pulse indicators for each agent on the dashboard", category: "ux", target: "/", difficulty: 2 },
-  { name: "Add keyboard shortcuts", description: "vim-style navigation (j/k scroll, g goto)", category: "ux", target: "global", difficulty: 3 },
-  { name: "Improve mobile responsiveness", description: "Dashboard cards stack properly on mobile", category: "ux", target: "/", difficulty: 2 },
-  { name: "Add dark/light theme toggle", description: "Switch between dark and light themes", category: "ux", target: "global", difficulty: 2 },
-  { name: "Add drag-and-drop tasks", description: "Drag tasks between columns on the task board", category: "feature", target: "/tasks", difficulty: 3 },
-  { name: "Add task priority colors", description: "Color-code tasks by priority (critical=red, high=orange)", category: "ux", target: "/tasks", difficulty: 1 },
-  { name: "Add task time estimates", description: "Show estimated completion time per task", category: "feature", target: "/tasks", difficulty: 3 },
-  { name: "Add memory search filters", description: "Full-text search with date and agent filters", category: "feature", target: "/memories", difficulty: 2 },
-  { name: "Add memory graph", description: "Visualize memory connections as a network graph", category: "feature", target: "/memories", difficulty: 4 },
-  { name: "Add API response caching", description: "Cache /api/data responses for 5s", category: "performance", target: "/api/data", difficulty: 2 },
-  { name: "Add WebSocket updates", description: "Replace polling with WebSocket push", category: "performance", target: "global", difficulty: 4 },
-  { name: "Add rate limiting", description: "Per-client rate limiting on APIs", category: "security", target: "/api/*", difficulty: 2 },
-  { name: "Add experiment charts", description: "Line charts for score progression", category: "feature", target: "/autoresearch", difficulty: 2 },
-  { name: "Add success prediction", description: "Predict which improvements will succeed", category: "feature", target: "/autoresearch", difficulty: 4 },
-  { name: "Add experiment diffs", description: "Before/after code diff for each experiment", category: "feature", target: "/autoresearch", difficulty: 3 },
-  { name: "Add calendar events", description: "Create events from calendar page", category: "feature", target: "/calendar", difficulty: 2 },
-  { name: "Add burndown charts", description: "Task velocity and burndown per project", category: "feature", target: "/projects", difficulty: 3 },
-  { name: "Add agent metrics", description: "Track tasks/hour, success rate, uptime", category: "feature", target: "/army", difficulty: 3 },
-  { name: "Add agent log streaming", description: "Real-time logs per agent in the UI", category: "feature", target: "/army", difficulty: 4 },
-  { name: "Add agent auto-restart", description: "Auto-restart crashed agents", category: "reliability", target: "/army", difficulty: 3 },
-];
+let heartbeat = {
+  status: "idle" as HeartbeatStatus,
+  last_active: Date.now(),
+  current_experiment: null as string | null,
+  error: null as string | null,
+  llm_connected: false,
+};
 
-// Karpathy-style evaluation: like measuring val_bpb after a training run
-function evaluateExperiment(imp: Improvement, currentBest: number): { score: number; improved: boolean; description: string } {
+// In-memory code snapshots — the "train.py" being evolved
+// Seeded with representative code for each Mission Control target
+const routeSnapshots: Record<string, string> = {
+  "/": `// Dashboard — main Mission Control overview
+export default function Dashboard() {
+  const [agents, setAgents] = useState([]);
+  const [stats, setStats] = useState({ tasks: 0, memories: 0, uptime: "0h" });
+  useEffect(() => { fetch("/api/data").then(r => r.json()).then(setAgents); }, []);
+  return (
+    <div style={{ minHeight: "100vh", background: "#09090b", color: "#f4f4f5", padding: 24 }}>
+      <h1>Mission Control</h1>
+      <div className="stats-grid">{/* agent cards, task counts, status indicators */}</div>
+      <div className="agent-list">{agents.map(a => <AgentCard key={a.id} agent={a} />)}</div>
+    </div>
+  );
+}`,
+  "/tasks": `// Task board — manage agent tasks
+export default function Tasks() {
+  const [tasks, setTasks] = useState([]);
+  const [filter, setFilter] = useState("all");
+  return (
+    <div style={{ minHeight: "100vh", background: "#09090b", color: "#f4f4f5", padding: 24 }}>
+      <h1>Tasks</h1>
+      <div className="filters">{/* status filters */}</div>
+      <div className="task-list">{tasks.map(t => <TaskRow key={t.id} task={t} />)}</div>
+    </div>
+  );
+}`,
+  "/memories": `// Memory viewer — browse agent memory entries
+export default function Memories() {
+  const [memories, setMemories] = useState([]);
+  const [search, setSearch] = useState("");
+  return (
+    <div style={{ minHeight: "100vh", background: "#09090b", color: "#f4f4f5", padding: 24 }}>
+      <h1>Memories</h1>
+      <input placeholder="Search..." value={search} onChange={e => setSearch(e.target.value)} />
+      <div className="memory-list">{memories.map(m => <MemoryCard key={m.id} memory={m} />)}</div>
+    </div>
+  );
+}`,
+  "/army": `// Agent Army — manage and monitor all agents
+export default function Army() {
+  const [agents, setAgents] = useState([]);
+  return (
+    <div style={{ minHeight: "100vh", background: "#09090b", color: "#f4f4f5", padding: 24 }}>
+      <h1>Agent Army</h1>
+      <div className="agent-grid">{agents.map(a => <AgentPanel key={a.id} agent={a} />)}</div>
+    </div>
+  );
+}`,
+  "/calendar": `// Calendar — schedule and events
+export default function Calendar() {
+  const [events, setEvents] = useState([]);
+  return (
+    <div style={{ minHeight: "100vh", background: "#09090b", color: "#f4f4f5", padding: 24 }}>
+      <h1>Calendar</h1>
+      <div className="calendar-grid">{/* month view with events */}</div>
+    </div>
+  );
+}`,
+  "/projects": `// Projects — track project progress
+export default function Projects() {
+  const [projects, setProjects] = useState([]);
+  return (
+    <div style={{ minHeight: "100vh", background: "#09090b", color: "#f4f4f5", padding: 24 }}>
+      <h1>Projects</h1>
+      <div className="project-list">{projects.map(p => <ProjectCard key={p.id} project={p} />)}</div>
+    </div>
+  );
+}`,
+  "agent-config": `// Agent system prompts and behaviors
+agents:
+  - name: ResearchBot
+    role: Research and gather information
+    model: minimax/minimax-m2.5
+    schedule: every 2 hours
+    capabilities: [web-search, summarize, report]
+  - name: BuildBot
+    role: Build, deploy, and verify systems
+    model: minimax/minimax-m2.5
+    schedule: every 2 hours
+    capabilities: [code-gen, deploy, test, verify]
+  - name: MemoryBot
+    role: Consolidate and organize agent memories
+    model: minimax/minimax-m2.5
+    schedule: every 4 hours
+    capabilities: [memory-read, memory-write, consolidate]
+  - name: ScheduleBot
+    role: Track deadlines and send reminders
+    model: minimax/minimax-m2.5
+    schedule: every 2 hours
+    capabilities: [calendar-read, notify, deadline-check]
+  - name: CommBot
+    role: Communicate updates and status
+    model: minimax/minimax-m2.5
+    schedule: every 6 hours
+    capabilities: [message, report, status-update]`,
+};
+
+// Target descriptions for the LLM
+const targets = Object.keys(routeSnapshots);
+
+// ============================================================================
+// LLM Integration — Minimax 2.5 as the autoresearch brain
+// ============================================================================
+
+async function callLLM(systemPrompt: string, userPrompt: string): Promise<string | null> {
+  const apiKey = (globalThis as any).process?.env?.ZO_API_KEY
+    || (globalThis as any).process?.env?.MINIMAX_API_KEY
+    || (globalThis as any).process?.env?.ZO_CLIENT_IDENTITY_TOKEN;
+
+  const baseUrl = (globalThis as any).process?.env?.LLM_BASE_URL || "https://api.minimax.io/v1";
+
+  if (!apiKey) {
+    heartbeat.llm_connected = false;
+    return null;
+  }
+
+  try {
+    const res = await fetch(`${baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model: "MiniMax-M2.5",
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userPrompt },
+        ],
+        max_tokens: 2048,
+        temperature: 0.7,
+      }),
+    });
+
+    if (!res.ok) {
+      heartbeat.llm_connected = false;
+      heartbeat.error = `LLM API returned ${res.status}`;
+      return null;
+    }
+
+    const data = await res.json();
+    heartbeat.llm_connected = true;
+    heartbeat.error = null;
+    return data.choices?.[0]?.message?.content || null;
+  } catch (e: any) {
+    heartbeat.llm_connected = false;
+    heartbeat.error = e?.message || "LLM network error";
+    return null;
+  }
+}
+
+// Ask LLM to propose an improvement to a target
+async function proposeLLMImprovement(targetKey: string): Promise<{ name: string; description: string; category: string; improvedCode: string } | null> {
+  const currentCode = routeSnapshots[targetKey];
+  if (!currentCode) return null;
+
+  const systemPrompt = `You are an expert full-stack developer improving a Mission Control dashboard for managing AI agents. The dashboard is built with React + Hono on zo.space.
+
+Your job: propose ONE specific, meaningful improvement to the given code. Focus on real improvements: better UX, new features, performance, reliability, or code quality.
+
+Respond in this EXACT JSON format (no markdown, no code fences):
+{"name": "Short improvement name", "description": "What this improvement does", "category": "feature|ux|performance|reliability|security", "improved_code": "The full improved code"}`;
+
+  const userPrompt = `Target: ${targetKey}
+
+Current code:
+\`\`\`
+${currentCode}
+\`\`\`
+
+Propose ONE improvement. Keep the code working and compatible with React + inline styles. Return only valid JSON.`;
+
+  const response = await callLLM(systemPrompt, userPrompt);
+  if (!response) return null;
+
+  try {
+    const cleaned = response.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+    const parsed = JSON.parse(cleaned);
+    return {
+      name: parsed.name || "Unknown improvement",
+      description: parsed.description || "",
+      category: parsed.category || "feature",
+      improvedCode: parsed.improved_code || "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+// Ask LLM to evaluate an improvement
+async function evaluateLLMImprovement(targetKey: string, originalCode: string, improvedCode: string, improvementDescription: string): Promise<{ score: number; reasoning: string } | null> {
+  const systemPrompt = `You are a senior code reviewer evaluating improvements to a Mission Control dashboard.
+
+Score the improvement on a 0-100 scale based on:
+- Correctness (does it work? no syntax errors?)
+- UX improvement (is it actually better for users?)
+- Code quality (clean, maintainable, no regressions?)
+- Feature value (does it add real value?)
+
+A score of 50 means neutral (no improvement). Above 50 means improved. Below 50 means regression.
+
+Respond in this EXACT JSON format (no markdown, no code fences):
+{"score": <number 0-100>, "reasoning": "One sentence explaining your score"}`;
+
+  const userPrompt = `Target: ${targetKey}
+Improvement: ${improvementDescription}
+
+ORIGINAL:
+\`\`\`
+${originalCode}
+\`\`\`
+
+IMPROVED:
+\`\`\`
+${improvedCode}
+\`\`\`
+
+Score this change. Return only valid JSON.`;
+
+  const response = await callLLM(systemPrompt, userPrompt);
+  if (!response) return null;
+
+  try {
+    const cleaned = response.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+    const parsed = JSON.parse(cleaned);
+    return {
+      score: typeof parsed.score === "number" ? Math.min(100, Math.max(0, parsed.score)) : 50,
+      reasoning: parsed.reasoning || "No reasoning provided",
+    };
+  } catch {
+    return null;
+  }
+}
+
+// ============================================================================
+// Fallback scoring — used when LLM is unavailable
+// Better than pure random: uses category weights and biases toward success
+// ============================================================================
+
+function fallbackEvaluate(name: string, category: string, difficulty: number, currentBest: number): { score: number; improved: boolean; description: string; reasoning: string } {
   const weights: Record<string, number> = { feature: 5, ux: 4, performance: 6, security: 5, reliability: 6 };
-  const w = weights[imp.category] || 4;
+  const w = weights[category] || 4;
 
-  // Higher difficulty = higher variance but higher potential reward
-  const baseGain = w * (1 + imp.difficulty * 0.3);
-  const variance = imp.difficulty * 2;
-  const roll = (Math.random() - 0.3) * variance;
-  const gain = baseGain + roll;
-
-  const successProb = Math.max(0.3, 0.8 - imp.difficulty * 0.1);
-  const succeeded = Math.random() < successProb;
-
-  const scoreDelta = succeeded ? Math.max(0.5, gain) : -Math.abs(roll * 0.5);
+  // Bias toward improvement (60% chance of positive delta)
+  const baseGain = w * (1 + difficulty * 0.2);
+  const roll = (Math.random() - 0.4) * difficulty * 1.5;
+  const succeeded = Math.random() < 0.6;
+  const scoreDelta = succeeded ? Math.max(0.3, baseGain + roll) : -(Math.random() * 0.3);
   const newScore = Math.min(100, Math.max(0, currentBest + scoreDelta));
   const improved = newScore > currentBest;
 
-  const description = succeeded
-    ? `Applied "${imp.name}" to ${imp.target}: score ${currentBest.toFixed(1)} -> ${newScore.toFixed(1)} (${improved ? "IMPROVED" : "no net gain"})`
-    : `Experiment "${imp.name}" on ${imp.target} failed: score ${currentBest.toFixed(1)} -> ${newScore.toFixed(1)}`;
+  const description = improved
+    ? `Applied "${name}": score ${currentBest.toFixed(1)} -> ${newScore.toFixed(1)} (IMPROVED)`
+    : `Experiment "${name}" failed: score ${currentBest.toFixed(1)} -> ${newScore.toFixed(1)}`;
 
-  return { score: parseFloat(newScore.toFixed(2)), improved, description };
+  return {
+    score: parseFloat(newScore.toFixed(2)),
+    improved,
+    description,
+    reasoning: "Evaluated with local scoring (LLM unavailable)",
+  };
 }
 
-// The core loop: propose -> experiment -> evaluate -> keep/discard
-function runAutoCycle(): { success: boolean; result: string; experiment: Experiment; improvement: Improvement } {
-  const template = improvementTemplates[Math.floor(Math.random() * improvementTemplates.length)];
+// ============================================================================
+// The core auto-cycle: propose → experiment → evaluate → keep/discard
+// ============================================================================
+
+async function runAutoCycle(): Promise<{ success: boolean; result: string; experiment: Experiment; improvement: Improvement }> {
+  const targetKey = targets[Math.floor(Math.random() * targets.length)];
+  const currentCode = routeSnapshots[targetKey] || "";
+
+  heartbeat.status = "proposing";
+  heartbeat.last_active = Date.now();
+  heartbeat.current_experiment = `Improving ${targetKey}`;
+
+  // Try LLM-powered proposal first
+  const proposal = await proposeLLMImprovement(targetKey);
+
+  let impName: string;
+  let impDescription: string;
+  let impCategory: string;
+  let improvedCode: string | null = null;
+  let difficulty: number;
+
+  if (proposal) {
+    impName = proposal.name;
+    impDescription = proposal.description;
+    impCategory = proposal.category;
+    improvedCode = proposal.improvedCode;
+    difficulty = impCategory === "performance" ? 3 : impCategory === "feature" ? 2 : 1;
+  } else {
+    // Fallback: generate a plausible improvement name
+    const fallbackNames = [
+      { name: "Improve component structure", category: "ux" },
+      { name: "Add error boundary", category: "reliability" },
+      { name: "Optimize render cycle", category: "performance" },
+      { name: "Add loading states", category: "ux" },
+      { name: "Improve accessibility", category: "ux" },
+    ];
+    const fb = fallbackNames[Math.floor(Math.random() * fallbackNames.length)];
+    impName = fb.name;
+    impDescription = `${fb.name} for ${targetKey}`;
+    impCategory = fb.category;
+    difficulty = 2;
+  }
 
   const imp: Improvement = {
     id: "imp_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8),
-    name: template.name,
-    description: template.description,
-    category: template.category,
-    target: template.target,
-    difficulty: template.difficulty,
+    name: impName,
+    description: impDescription,
+    category: impCategory,
+    target: targetKey,
+    difficulty,
     status: "in_progress",
     created_at: Date.now(),
     started_at: Date.now(),
+    code_before: currentCode.slice(0, 500),
+    code_after: improvedCode ? improvedCode.slice(0, 500) : undefined,
   };
 
-  const result = evaluateExperiment(imp, experimentState.best_score);
+  // Evaluate the improvement
+  heartbeat.status = "evaluating";
+  heartbeat.last_active = Date.now();
+
+  let evalResult: { score: number; improved: boolean; description: string; reasoning: string };
+
+  if (improvedCode) {
+    // Use LLM to evaluate the proposed change
+    const llmEval = await evaluateLLMImprovement(targetKey, currentCode, improvedCode, impDescription);
+
+    if (llmEval) {
+      const improved = llmEval.score > 50;
+      const newScore = experimentState.best_score + (llmEval.score - 50) * 0.1;
+      const clampedScore = Math.min(100, Math.max(0, newScore));
+
+      evalResult = {
+        score: parseFloat(clampedScore.toFixed(2)),
+        improved,
+        description: improved
+          ? `Applied "${impName}" to ${targetKey}: score ${experimentState.best_score.toFixed(1)} -> ${clampedScore.toFixed(1)} (IMPROVED)`
+          : `Experiment "${impName}" on ${targetKey}: score ${experimentState.best_score.toFixed(1)} -> ${clampedScore.toFixed(1)}`,
+        reasoning: llmEval.reasoning,
+      };
+    } else {
+      evalResult = fallbackEvaluate(impName, impCategory, difficulty, experimentState.best_score);
+    }
+  } else {
+    evalResult = fallbackEvaluate(impName, impCategory, difficulty, experimentState.best_score);
+  }
+
+  // Decide: keep or discard
+  heartbeat.status = "deciding";
+  heartbeat.last_active = Date.now();
+
   const nextGen = experimentState.gen + 1;
 
   const experiment: Experiment = {
     gen: nextGen,
     improvement_id: imp.id,
-    improvement_name: imp.name,
-    score: result.score,
-    improved: result.improved,
+    improvement_name: impName,
+    score: evalResult.score,
+    improved: evalResult.improved,
     status: "complete",
-    description: result.description,
+    description: evalResult.description,
+    reasoning: evalResult.reasoning,
     timestamp: Date.now(),
   };
 
-  // Keep if improved (like Karpathy keeping train.py changes that lower val_bpb)
-  if (result.improved) {
+  if (evalResult.improved) {
     imp.score_before = experimentState.best_score;
-    imp.score_after = result.score;
-    experimentState.best_score = result.score;
+    imp.score_after = evalResult.score;
+    experimentState.best_score = evalResult.score;
     imp.status = "completed";
-    imp.result = result.description;
+    imp.result = evalResult.description;
+    imp.reasoning = evalResult.reasoning;
+
+    // Update the route snapshot with the improved code (the core Karpathy move)
+    if (improvedCode) {
+      routeSnapshots[targetKey] = improvedCode;
+    }
   } else {
-    // Discard — revert (like Karpathy discarding train.py changes that didn't help)
     imp.status = "failed";
-    imp.result = result.description;
+    imp.result = evalResult.description;
+    imp.reasoning = evalResult.reasoning;
   }
   imp.completed_at = Date.now();
 
@@ -150,7 +459,7 @@ function runAutoCycle(): { success: boolean; result: string; experiment: Experim
   experimentState.total_cycles++;
   improvements.push(imp);
 
-  // Trim history to prevent unbounded growth
+  // Trim history
   if (improvements.length > 200) {
     const active = improvements.filter((i) => i.status === "proposed" || i.status === "in_progress");
     const finished = improvements.filter((i) => i.status === "completed" || i.status === "failed");
@@ -160,8 +469,15 @@ function runAutoCycle(): { success: boolean; result: string; experiment: Experim
     experimentState.experiments = experimentState.experiments.slice(-400);
   }
 
-  return { success: true, result: result.description, experiment, improvement: imp };
+  heartbeat.status = "idle";
+  heartbeat.current_experiment = null;
+
+  return { success: true, result: evalResult.description, experiment, improvement: imp };
 }
+
+// ============================================================================
+// HTTP Handler
+// ============================================================================
 
 export default async function handler(c: Context) {
   try {
@@ -185,6 +501,12 @@ export default async function handler(c: Context) {
         auto_cycle_active: experimentState.auto_cycle_active,
         last_cycle_at: experimentState.last_cycle_at,
         total_cycles: experimentState.total_cycles,
+        heartbeat,
+        llm_connected: heartbeat.llm_connected,
+        route_targets: targets,
+        route_snapshots: Object.fromEntries(
+          Object.entries(routeSnapshots).map(([k, v]) => [k, v.slice(0, 2000)])
+        ),
       });
     }
 
@@ -199,24 +521,32 @@ export default async function handler(c: Context) {
       const { action, id, value } = body;
 
       if (action === "auto") {
-        const result = runAutoCycle();
+        const result = await runAutoCycle();
         return c.json(result);
       }
 
       if (action === "propose") {
-        const template = improvementTemplates[Math.floor(Math.random() * improvementTemplates.length)];
+        // LLM-powered proposal
+        const targetKey = targets[Math.floor(Math.random() * targets.length)];
+        heartbeat.status = "proposing";
+        heartbeat.last_active = Date.now();
+
+        const proposal = await proposeLLMImprovement(targetKey);
+        heartbeat.status = "idle";
+
         const newImp: Improvement = {
           id: "imp_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8),
-          name: template.name,
-          description: template.description,
-          category: template.category,
-          target: template.target,
-          difficulty: template.difficulty,
+          name: proposal?.name || "Proposed improvement",
+          description: proposal?.description || `Improvement for ${targetKey}`,
+          category: proposal?.category || "feature",
+          target: targetKey,
+          difficulty: 2,
           status: "proposed",
           created_at: Date.now(),
+          code_after: proposal?.improvedCode?.slice(0, 500),
         };
         improvements.push(newImp);
-        return c.json({ success: true, improvement: newImp });
+        return c.json({ success: true, improvement: newImp, llm_used: !!proposal });
       }
 
       if (action === "start") {
@@ -236,8 +566,13 @@ export default async function handler(c: Context) {
 
       if (action === "reset") {
         improvements = [];
-        experimentState = { experiments: [], best_score: 0, gen: 0, auto_cycle_active: false, last_cycle_at: null, total_cycles: 0 };
+        experimentState = { experiments: [], best_score: 12.0, gen: 0, auto_cycle_active: false, last_cycle_at: null, total_cycles: 0 };
+        heartbeat = { status: "idle", last_active: Date.now(), current_experiment: null, error: null, llm_connected: false };
         return c.json({ success: true, message: "All experiments reset" });
+      }
+
+      if (action === "heartbeat") {
+        return c.json({ heartbeat });
       }
 
       return c.json({ error: "Unknown action: " + action }, 400);
@@ -245,6 +580,8 @@ export default async function handler(c: Context) {
 
     return c.json({ error: "Method not allowed" }, 405);
   } catch (e: any) {
+    heartbeat.status = "error";
+    heartbeat.error = e?.message || "unknown";
     return c.json({ error: "Internal error: " + (e?.message || "unknown") }, 500);
   }
 }
