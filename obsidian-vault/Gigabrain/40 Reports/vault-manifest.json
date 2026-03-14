@@ -1,0 +1,25 @@
+{
+  "generated_at": "2026-03-13T03:57:39.304Z",
+  "vault_root": "/home/user/Zo/obsidian-vault",
+  "mirror_root": "/home/user/Zo/obsidian-vault/Gigabrain",
+  "generated_files": [
+    "00 Home/Home.md",
+    "30 Views/Current State.md",
+    "30 Views/Important People.md",
+    "30 Views/Important Projects.md",
+    "30 Views/Native Notes.md",
+    "30 Views/What Changed.md",
+    "40 Reports/surface-summary.json",
+    "40 Reports/vault-build-summary.json",
+    "40 Reports/vault-build-summary.md",
+    "40 Reports/vault-freshness.json",
+    "40 Reports/vault-manifest.json",
+    "vault-index.md"
+  ],
+  "manual_folders": [
+    "Inbox",
+    "Manual"
+  ],
+  "source_files": 0,
+  "active_nodes": 0
+}

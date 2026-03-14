@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EvoChat Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+        .gradient-bg { background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%); }
+    </style>
+</head>
+<body class="gradient-bg min-h-screen text-white">
+    <div class="container mx-auto px-4 py-8">
+        <div class="text-center mb-8">
+            <h1 class="text-5xl font-bold mb-2 bg-clip-text text-transparent bg-gradient-to-r from-purple-400 to-pink-400">EvoChat</h1>
+            <p class="text-gray-400">Evolutionary Idea Generator</p>
+        </div>
+        
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+            <div class="bg-gray-800/50 rounded-xl p-6 backdrop-blur">
+                <div class="text-gray-400 text-sm">Time Remaining</div>
+                <div class="text-4xl font-bold text-purple-400" id="countdown">0:59:59</div>
+            </div>
+            <div class="bg-gray-800/50 rounded-xl p-6 backdrop-blur">
+                <div class="text-gray-400 text-sm">Iterations</div>
+                <div class="text-4xl font-bold text-pink-400">1</div>
+            </div>
+            <div class="bg-gray-800/50 rounded-xl p-6 backdrop-blur">
+                <div class="text-gray-400 text-sm">Best Score</div>
+                <div class="text-4xl font-bold text-green-400">93.0</div>
+            </div>
+            <div class="bg-gray-800/50 rounded-xl p-6 backdrop-blur">
+                <div class="text-gray-400 text-sm">Avg Score</div>
+                <div class="text-4xl font-bold text-blue-400">93.0</div>
+            </div>
+        </div>
+        
+        <div class="bg-gray-800/50 rounded-xl p-6 mb-8 backdrop-blur">
+            <div class="text-gray-400 text-sm mb-2">Current Goal</div>
+            <div class="text-xl font-semibold">viral TikTok idea generator</div>
+        </div>
+        
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
+            <div class="bg-gray-800/50 rounded-xl p-6 backdrop-blur">
+                <h3 class="text-lg font-semibold mb-4">Score Progress</h3>
+                <canvas id="scoreChart"></canvas>
+            </div>
+            <div class="bg-gray-800/50 rounded-xl p-6 backdrop-blur">
+                <h3 class="text-lg font-semibold mb-4">Improvement</h3>
+                <canvas id="improvementChart"></canvas>
+            </div>
+        </div>
+        
+        
+        <div class="bg-gradient-to-r from-green-900/50 to-blue-900/50 rounded-xl p-6 mb-8 backdrop-blur border border-green-500/30">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-xl font-bold text-green-400">Best Result</h3>
+                <span class="bg-green-500/20 text-green-400 px-3 py-1 rounded-full">Score: 93.0</span>
+            </div>
+            <div class="text-sm text-gray-300 mb-2">Iteration 1 - 2026-03-14 04:28:10</div>
+            <ul class="space-y-2"><li class="text-gray-200">• AI-powered trend spotter that identifies rising sounds before they go viral</li><li class="text-gray-200">• Automated script generator with viral hooks and trending topic integration</li><li class="text-gray-200">• Niche-specific content calendar that syncs with optimal posting times</li><li class="text-gray-200">• AI dubbing tool for repurposing content across languages and regions</li><li class="text-gray-200">• Viral hook library with A/B testing framework for thumbnails</li><li class="text-gray-200">• Creator monetization tracker that finds sponsorship opportunities</li><li class="text-gray-200">• Trend prediction dashboard using AI to forecast viral potential</li><li class="text-gray-200">• Automated short-form video editor with viral templates</li></ul>
+        </div>
+        
+        <div class="bg-gray-800/50 rounded-xl p-6 backdrop-blur">
+            <h3 class="text-lg font-semibold mb-4">Recent Iterations</h3>
+            <div class="space-y-3 max-h-64 overflow-y-auto">
+        <div class="flex items-center justify-between bg-gray-700/30 rounded-lg p-3">
+            <div>
+                <span class="text-gray-400">Iteration 1</span>
+                <span class="ml-3 text-sm text-gray-500">2026-03-14 04:28:10</span>
+            </div>
+            <span class="text-green-400 font-semibold">93.0</span>
+        </div></div>
+        </div>
+        
+        <div class="text-center mt-8 text-gray-500 text-sm">EvoChat v1.0 | Auto-refreshes every 10 seconds</div>
+    </div>
+    
+    <script>
+        new Chart(document.getElementById('scoreChart'), {
+            type: 'line',
+            data: {
+                labels: ["I1"],
+                datasets: [{
+                    label: 'Score',
+                    data: [93.0],
+                    borderColor: '#a855f7',
+                    backgroundColor: 'rgba(168, 85, 247, 0.1)',
+                    fill: true,
+                    tension: 0.4
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { display: false } },
+                scales: {
+                    y: { min: 0, max: 100, grid: { color: 'rgba(255,255,255,0.1)' } },
+                    x: { grid: { color: 'rgba(255,255,255,0.1)' } }
+                }
+            }
+        });
+        
+        new Chart(document.getElementById('improvementChart'), {
+            type: 'bar',
+            data: {
+                labels: ["I1"],
+                datasets: [{
+                    label: 'Improvement',
+                    data: [0.0],
+                    backgroundColor: ["#22c55e"]
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: { legend: { display: false } },
+                scales: {
+                    y: { grid: { color: 'rgba(255,255,255,0.1)' } },
+                    x: { grid: { color: 'rgba(255,255,255,0.1)' } }
+                }
+            }
+        });
+        
+        setInterval(() => {
+            fetch(window.location.href)
+                .then(r => r.text())
+                .then(html => {
+                    const parser = new DOMParser();
+                    const doc = parser.parseFromString(html, 'text/html');
+                    const countdown = doc.getElementById('countdown');
+                    if (countdown) {
+                        document.getElementById('countdown').textContent = countdown.textContent;
+                    }
+                })
+                .catch(() => {});
+        }, 10000);
+    </script>
+</body>
+</html>

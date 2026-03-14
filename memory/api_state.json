@@ -1,0 +1,16 @@
+{
+  "memories": [
+    {
+      "id": 1773374593856,
+      "content": "Test memory from API",
+      "captured_at": "2026-03-13T04:03:13.856Z",
+      "scope": "global"
+    },
+    {
+      "id": 1773375658556,
+      "content": "Debug test memory",
+      "captured_at": "2026-03-13T04:20:58.556Z",
+      "scope": "debug"
+    }
+  ]
+}
