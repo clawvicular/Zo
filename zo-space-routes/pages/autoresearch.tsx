@@ -1,426 +1,417 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Activity, Brain, Plus, Play, Square, Terminal, Cpu, Wrench, Zap, Timer } from "lucide-react";
 
-const AUTO_CYCLE_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+// Only use icons known to exist in all lucide-react versions
+import { Activity, Brain, Plus, Play, Square, Terminal, Cpu, Wrench, Zap, Clock } from "lucide-react";
+
+const CYCLE_MS = 5 * 60 * 1000; // 5 minutes
 
 export default function AutoResearch() {
-  const [state, setState] = useState<any>(null);
+  const [llmState, setLlmState] = useState<any>(null);
   const [metaState, setMetaState] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [autoCycleActive, setAutoCycleActive] = useState(false);
-  const [secondsUntilNext, setSecondsUntilNext] = useState(0);
-  const [cycleLog, setCycleLog] = useState<string[]>([]);
-  const [cycleCount, setCycleCount] = useState(0);
-  const autoCycleRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const nextRunRef = useRef<number>(0);
+  const [autoActive, setAutoActive] = useState(false);
+  const [countdown, setCountdown] = useState(0);
+  const [logs, setLogs] = useState<string[]>([]);
+  const [cycles, setCycles] = useState(0);
+
+  const timerRef = useRef<any>(null);
+  const tickRef = useRef<any>(null);
+  const nextRef = useRef(0);
+  const restoredRef = useRef(false);
+
+  // Fetch both APIs independently — one failing doesn't break the other
+  const fetchState = useCallback(async () => {
+    try {
+      const res = await fetch("/api/meta-improve");
+      if (res.ok) setMetaState(await res.json());
+    } catch {}
+    try {
+      const res = await fetch("/api/autoresearch");
+      if (res.ok) setLlmState(await res.json());
+    } catch {}
+  }, []);
 
   useEffect(() => {
     fetchState();
-    const interval = setInterval(fetchState, 5000);
-    return () => clearInterval(interval);
-  }, []);
+    const id = setInterval(fetchState, 5000);
+    return () => clearInterval(id);
+  }, [fetchState]);
 
-  // Restore auto-cycle state from server on first load
-  const hasRestoredRef = useRef(false);
+  // Restore auto-cycle from server state
   useEffect(() => {
-    if (metaState?.auto_cycle_active && !autoCycleActive && !hasRestoredRef.current) {
-      hasRestoredRef.current = true;
-      startAutoCycle(true); // skipPersist=true since server already knows
+    if (metaState?.auto_cycle_active && !autoActive && !restoredRef.current) {
+      restoredRef.current = true;
+      startLoop(true);
     }
   }, [metaState?.auto_cycle_active]);
 
   useEffect(() => {
     return () => {
-      if (autoCycleRef.current) clearInterval(autoCycleRef.current);
-      if (countdownRef.current) clearInterval(countdownRef.current);
+      if (timerRef.current) clearInterval(timerRef.current);
+      if (tickRef.current) clearInterval(tickRef.current);
     };
   }, []);
 
-  const fetchState = async () => {
-    try {
-      const [expRes, metaRes] = await Promise.all([
-        fetch("/api/autoresearch"),
-        fetch("/api/meta-improve")
-      ]);
-      const expData = await expRes.json();
-      const metaData = await metaRes.json();
-      setState(expData);
-      setMetaState(metaData);
-    } catch (e) {
-      console.error("Failed to fetch state:", e);
-    }
-  };
-
-  const addLog = useCallback((msg: string) => {
-    const ts = new Date().toLocaleTimeString();
-    setCycleLog(prev => [`[${ts}] ${msg}`, ...prev].slice(0, 50));
+  const log = useCallback((msg: string) => {
+    const t = new Date().toLocaleTimeString();
+    setLogs((prev) => [`[${t}] ${msg}`, ...prev].slice(0, 50));
   }, []);
 
-  // Run one full 5-minute auto-experiment cycle
-  const runAutoCycle = useCallback(async () => {
-    addLog("Starting 5-min experiment cycle...");
-
+  const runOneCycle = useCallback(async () => {
+    log("Starting experiment cycle...");
     try {
-      // Call the auto action which does propose + evaluate in one shot
-      addLog("Running experiment on Mission Control...");
       const res = await fetch("/api/meta-improve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "auto" })
+        body: JSON.stringify({ action: "auto" }),
       });
       const data = await res.json();
-
       if (data.success) {
-        const imp = data.improvement;
         const icon = data.experiment?.improved ? "+" : "-";
-        addLog(`[${icon}] ${imp?.name} → ${imp?.target}`);
-        addLog(`    ${data.result}`);
+        log(`[${icon}] ${data.improvement?.name} -> ${data.improvement?.target}`);
+        log("    " + data.result);
         if (data.experiment?.improved) {
-          addLog(`    Score improved to ${data.experiment.score.toFixed(1)}`);
+          log("    Score: " + data.experiment.score.toFixed(1));
         }
       } else {
-        addLog(`Cycle failed: ${data.error || "unknown error"}`);
+        log("Cycle failed: " + (data.error || "unknown"));
+      }
+      await fetchState();
+      setCycles((c) => c + 1);
+      log("Done. Next cycle in 5 min.");
+    } catch (e: any) {
+      log("Error: " + (e?.message || "network error"));
+    }
+  }, [log, fetchState]);
+
+  const startLoop = useCallback(
+    (skipPersist = false) => {
+      if (timerRef.current) return;
+      setAutoActive(true);
+      log("Auto-evolution STARTED");
+
+      if (!skipPersist) {
+        fetch("/api/meta-improve", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "set_auto", value: true }),
+        }).catch(() => {});
       }
 
-      await fetchState();
-      setCycleCount(prev => prev + 1);
-      addLog("Cycle complete. Next in 5 minutes...");
-    } catch (e: any) {
-      addLog(`Cycle error: ${e.message}`);
-    }
-  }, [addLog]);
+      runOneCycle();
+      nextRef.current = Date.now() + CYCLE_MS;
 
-  const startAutoCycle = useCallback((skipPersist = false) => {
-    if (autoCycleRef.current) return;
+      timerRef.current = setInterval(() => {
+        runOneCycle();
+        nextRef.current = Date.now() + CYCLE_MS;
+      }, CYCLE_MS);
 
-    setAutoCycleActive(true);
-    addLog("Auto-experiment loop STARTED (5-minute cycles)");
+      tickRef.current = setInterval(() => {
+        setCountdown(Math.max(0, Math.ceil((nextRef.current - Date.now()) / 1000)));
+      }, 1000);
+    },
+    [log, runOneCycle]
+  );
 
-    // Persist to server (unless restoring from server state)
-    if (!skipPersist) {
-      fetch("/api/meta-improve", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "set_auto", value: true })
-      }).catch(() => {});
-    }
-
-    // Run first cycle immediately
-    runAutoCycle();
-
-    nextRunRef.current = Date.now() + AUTO_CYCLE_INTERVAL_MS;
-
-    autoCycleRef.current = setInterval(() => {
-      runAutoCycle();
-      nextRunRef.current = Date.now() + AUTO_CYCLE_INTERVAL_MS;
-    }, AUTO_CYCLE_INTERVAL_MS);
-
-    countdownRef.current = setInterval(() => {
-      const remaining = Math.max(0, Math.ceil((nextRunRef.current - Date.now()) / 1000));
-      setSecondsUntilNext(remaining);
-    }, 1000);
-  }, [addLog, runAutoCycle]);
-
-  const stopAutoCycle = useCallback(() => {
-    if (autoCycleRef.current) {
-      clearInterval(autoCycleRef.current);
-      autoCycleRef.current = null;
-    }
-    if (countdownRef.current) {
-      clearInterval(countdownRef.current);
-      countdownRef.current = null;
-    }
-    setAutoCycleActive(false);
-    setSecondsUntilNext(0);
-    addLog("Auto-experiment loop STOPPED");
-
-    // Persist to server
+  const stopLoop = useCallback(() => {
+    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+    if (tickRef.current) { clearInterval(tickRef.current); tickRef.current = null; }
+    setAutoActive(false);
+    setCountdown(0);
+    log("Auto-evolution STOPPED");
     fetch("/api/meta-improve", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "set_auto", value: false })
+      body: JSON.stringify({ action: "set_auto", value: false }),
     }).catch(() => {});
-  }, [addLog]);
+  }, [log]);
 
-  const runAction = async (action: string, payload = {}) => {
-    setLoading(true);
-    try {
-      await fetch("/api/autoresearch", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, ...payload })
-      });
-      await fetchState();
-    } catch (e) {
-      console.error("Action failed:", e);
-    }
-    setLoading(false);
-  };
-
-  const runMetaAction = async (action: string, payload = {}) => {
+  const metaAction = async (action: string, extra = {}) => {
     setLoading(true);
     try {
       await fetch("/api/meta-improve", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, ...payload })
+        body: JSON.stringify({ action, ...extra }),
       });
       await fetchState();
-    } catch (e) {
-      console.error("Meta action failed:", e);
+    } catch (e: any) {
+      setError(e?.message || "Request failed");
     }
     setLoading(false);
   };
 
-  const formatCountdown = (seconds: number) => {
-    const m = Math.floor(seconds / 60);
-    const s = seconds % 60;
-    return `${m}:${s.toString().padStart(2, "0")}`;
+  const llmAction = async (action: string, extra = {}) => {
+    setLoading(true);
+    try {
+      await fetch("/api/autoresearch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action, ...extra }),
+      });
+      await fetchState();
+    } catch (e: any) {
+      setError(e?.message || "Request failed");
+    }
+    setLoading(false);
+  };
+
+  const fmtTime = (s: number) => {
+    const m = Math.floor(s / 60);
+    return m + ":" + (s % 60).toString().padStart(2, "0");
   };
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 p-6">
-      <div className="max-w-7xl mx-auto space-y-6">
+    <div style={{ minHeight: "100vh", background: "#09090b", color: "#f4f4f5", padding: 24 }}>
+      <div style={{ maxWidth: 1200, margin: "0 auto" }}>
         {/* Header */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Brain className="w-8 h-8 text-purple-500" />
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <Brain size={32} color="#a855f7" />
             <div>
-              <h1 className="text-2xl font-bold">AutoResearch</h1>
-              <p className="text-zinc-400">Self-improving Mission Control — 5-minute experiments that evolve the dashboard</p>
+              <h1 style={{ fontSize: 24, fontWeight: "bold", margin: 0 }}>AutoResearch</h1>
+              <p style={{ color: "#a1a1aa", margin: 0, fontSize: 14 }}>
+                Karpathy-style self-improvement for Mission Control
+              </p>
             </div>
           </div>
-          <a href="/" className="px-4 py-2 bg-zinc-800 rounded-lg hover:bg-zinc-700">← Dashboard</a>
+          <a href="/" style={{ padding: "8px 16px", background: "#27272a", borderRadius: 8, color: "#f4f4f5", textDecoration: "none" }}>
+            Dashboard
+          </a>
         </div>
 
-        {/* Stats */}
-        <div className="grid grid-cols-5 gap-4">
-          <div className="bg-zinc-900 rounded-xl p-4">
-            <div className="text-zinc-400 text-sm">Control Center Score</div>
-            <div className="text-3xl font-bold text-green-400">{metaState?.best_score?.toFixed(1) || "0"}<span className="text-lg text-zinc-500">/100</span></div>
+        {/* Error banner */}
+        {error && (
+          <div style={{ background: "#7f1d1d", padding: 12, borderRadius: 8, marginBottom: 16, display: "flex", justifyContent: "space-between" }}>
+            <span>{error}</span>
+            <button onClick={() => setError(null)} style={{ background: "none", border: "none", color: "#f4f4f5", cursor: "pointer" }}>x</button>
           </div>
-          <div className="bg-zinc-900 rounded-xl p-4">
-            <div className="text-zinc-400 text-sm">Generation</div>
-            <div className="text-3xl font-bold text-blue-400">{metaState?.gen || 0}</div>
-          </div>
-          <div className="bg-zinc-900 rounded-xl p-4">
-            <div className="text-zinc-400 text-sm">Status</div>
-            <div className={`text-xl font-bold ${autoCycleActive ? 'text-green-400' : 'text-zinc-400'}`}>
-              {autoCycleActive ? "auto-evolving" : "idle"}
+        )}
+
+        {/* Stats Row */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 16, marginBottom: 24 }}>
+          {[
+            { label: "Score", value: (metaState?.best_score ?? 0).toFixed(1) + "/100", color: "#4ade80" },
+            { label: "Generation", value: metaState?.gen ?? 0, color: "#60a5fa" },
+            { label: "Status", value: autoActive ? "evolving" : "idle", color: autoActive ? "#4ade80" : "#a1a1aa" },
+            { label: "Improved", value: metaState?.total_completed ?? 0, color: "#a855f7" },
+            { label: "Success Rate", value: ((metaState?.success_rate ?? 0) * 100).toFixed(0) + "%", color: "#facc15" },
+          ].map((s, i) => (
+            <div key={i} style={{ background: "#18181b", borderRadius: 12, padding: 16 }}>
+              <div style={{ color: "#a1a1aa", fontSize: 12, marginBottom: 4 }}>{s.label}</div>
+              <div style={{ fontSize: 28, fontWeight: "bold", color: s.color }}>{s.value}</div>
             </div>
-          </div>
-          <div className="bg-zinc-900 rounded-xl p-4">
-            <div className="text-zinc-400 text-sm">Improvements Applied</div>
-            <div className="text-3xl font-bold text-purple-400">{metaState?.total_completed || 0}</div>
-          </div>
-          <div className="bg-zinc-900 rounded-xl p-4">
-            <div className="text-zinc-400 text-sm">Success Rate</div>
-            <div className="text-3xl font-bold text-yellow-400">{((metaState?.success_rate || 0) * 100).toFixed(0)}%</div>
-          </div>
+          ))}
         </div>
 
-        {/* 5-Minute Auto-Experiment Loop */}
-        <div className={`bg-zinc-900 rounded-xl p-6 border-2 ${autoCycleActive ? 'border-green-500/50 shadow-lg shadow-green-500/10' : 'border-purple-500/30'}`}>
-          <h2 className="text-lg font-semibold mb-2 flex items-center gap-2">
-            <Timer className={`w-5 h-5 ${autoCycleActive ? 'text-green-400' : 'text-purple-400'}`} />
-            5-Minute Self-Improvement Loop
-            {autoCycleActive && (
-              <span className="ml-2 px-2 py-0.5 bg-green-600 rounded text-xs animate-pulse">ACTIVE</span>
+        {/* Main Loop Control */}
+        <div style={{
+          background: "#18181b",
+          borderRadius: 12,
+          padding: 24,
+          marginBottom: 24,
+          border: autoActive ? "2px solid rgba(74, 222, 128, 0.4)" : "2px solid rgba(168, 85, 247, 0.3)",
+          boxShadow: autoActive ? "0 0 20px rgba(74, 222, 128, 0.1)" : "none",
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+            <Clock size={20} color={autoActive ? "#4ade80" : "#a855f7"} />
+            <h2 style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>5-Minute Self-Improvement Loop</h2>
+            {autoActive && (
+              <span style={{ marginLeft: 8, padding: "2px 8px", background: "#16a34a", borderRadius: 4, fontSize: 12 }}>
+                ACTIVE
+              </span>
             )}
-          </h2>
-          <p className="text-zinc-400 text-sm mb-4">
-            Every 5 minutes: proposes a Mission Control improvement, runs the experiment, and applies it if it improves the score.
-            Like Karpathy's AutoResearch, but instead of training LLMs, it trains the dashboard itself.
+          </div>
+          <p style={{ color: "#a1a1aa", fontSize: 13, marginBottom: 16 }}>
+            Every 5 min: propose improvement → run experiment → measure score → keep if improved, discard if not.
+            Like Karpathy's autoresearch but evolving the dashboard instead of training LLMs.
           </p>
 
-          <div className="flex items-center gap-4 mb-4">
-            {!autoCycleActive ? (
-              <button
-                onClick={() => startAutoCycle()}
-                className="px-6 py-3 bg-green-600 rounded-lg hover:bg-green-500 flex items-center gap-2 font-semibold transition-colors"
-              >
-                <Play className="w-5 h-5" /> Start Auto-Evolution
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+            {!autoActive ? (
+              <button onClick={() => startLoop()} style={{ padding: "12px 24px", background: "#16a34a", borderRadius: 8, border: "none", color: "white", fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 8 }}>
+                <Play size={18} /> Start Auto-Evolution
               </button>
             ) : (
-              <button
-                onClick={stopAutoCycle}
-                className="px-6 py-3 bg-red-600 rounded-lg hover:bg-red-500 flex items-center gap-2 font-semibold transition-colors"
-              >
-                <Square className="w-5 h-5" /> Stop
+              <button onClick={stopLoop} style={{ padding: "12px 24px", background: "#dc2626", borderRadius: 8, border: "none", color: "white", fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", gap: 8 }}>
+                <Square size={18} /> Stop
               </button>
             )}
 
-            <button
-              onClick={() => runMetaAction("auto")}
-              disabled={loading}
-              className="px-4 py-3 bg-purple-600 rounded-lg hover:bg-purple-500 disabled:opacity-50 flex items-center gap-2 transition-colors"
-            >
-              <Zap className="w-4 h-4" /> Run Single Experiment
+            <button onClick={() => metaAction("auto")} disabled={loading} style={{ padding: "12px 16px", background: "#7c3aed", borderRadius: 8, border: "none", color: "white", cursor: "pointer", display: "flex", alignItems: "center", gap: 8, opacity: loading ? 0.5 : 1 }}>
+              <Zap size={16} /> Run Single Experiment
             </button>
 
-            {autoCycleActive && (
-              <div className="flex items-center gap-4">
-                <div className="bg-zinc-800 rounded-lg px-4 py-2">
-                  <span className="text-zinc-400 text-sm">Next in </span>
-                  <span className="text-green-400 font-mono text-lg">{formatCountdown(secondsUntilNext)}</span>
+            {autoActive && (
+              <>
+                <div style={{ background: "#27272a", borderRadius: 8, padding: "8px 16px" }}>
+                  <span style={{ color: "#a1a1aa", fontSize: 13 }}>Next in </span>
+                  <span style={{ color: "#4ade80", fontFamily: "monospace", fontSize: 18 }}>{fmtTime(countdown)}</span>
                 </div>
-                <div className="bg-zinc-800 rounded-lg px-4 py-2">
-                  <span className="text-zinc-400 text-sm">Cycles: </span>
-                  <span className="text-purple-400 font-bold">{cycleCount}</span>
+                <div style={{ background: "#27272a", borderRadius: 8, padding: "8px 16px" }}>
+                  <span style={{ color: "#a1a1aa", fontSize: 13 }}>Cycles: </span>
+                  <span style={{ color: "#a855f7", fontWeight: "bold" }}>{cycles}</span>
                 </div>
-              </div>
+              </>
             )}
           </div>
 
           {/* Activity Log */}
-          {cycleLog.length > 0 && (
-            <div className="bg-zinc-950 rounded-lg p-4 max-h-48 overflow-y-auto font-mono text-xs">
-              {cycleLog.map((log, idx) => (
-                <div key={idx} className={`py-0.5 ${idx === 0 ? 'text-green-400' : 'text-zinc-500'}`}>
-                  {log}
-                </div>
+          {logs.length > 0 && (
+            <div style={{ background: "#09090b", borderRadius: 8, padding: 16, maxHeight: 192, overflowY: "auto", fontFamily: "monospace", fontSize: 11 }}>
+              {logs.map((l, i) => (
+                <div key={i} style={{ padding: "2px 0", color: i === 0 ? "#4ade80" : "#71717a" }}>{l}</div>
               ))}
             </div>
           )}
         </div>
 
         {/* Manual Controls */}
-        <div className="bg-zinc-900 rounded-xl p-6">
-          <h2 className="text-lg font-semibold mb-4 flex items-center gap-2"><Wrench className="w-5 h-5 text-purple-400" /> Manual Controls</h2>
-          <div className="grid grid-cols-3 gap-4 mb-6">
-            <div className="bg-zinc-800 rounded-lg p-4">
-              <div className="text-zinc-400 text-sm">Proposed</div>
-              <div className="text-2xl font-bold">{metaState?.proposed_count || 0}</div>
-            </div>
-            <div className="bg-zinc-800 rounded-lg p-4">
-              <div className="text-zinc-400 text-sm">In Progress</div>
-              <div className="text-2xl font-bold text-yellow-400">{metaState?.in_progress_count || 0}</div>
-            </div>
-            <div className="bg-zinc-800 rounded-lg p-4">
-              <div className="text-zinc-400 text-sm">Failed</div>
-              <div className="text-2xl font-bold text-red-400">{metaState?.total_failed || 0}</div>
-            </div>
+        <div style={{ background: "#18181b", borderRadius: 12, padding: 24, marginBottom: 24 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+            <Wrench size={20} color="#a855f7" />
+            <h2 style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>Manual Controls</h2>
           </div>
 
-          <div className="flex gap-3 mb-6">
-            <button onClick={() => runMetaAction("propose")} disabled={loading} className="px-4 py-2 bg-purple-600 rounded-lg hover:bg-purple-500 disabled:opacity-50 flex items-center gap-2">
-              <Plus className="w-4 h-4" /> Propose Improvement
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 16 }}>
+            {[
+              { label: "Proposed", value: metaState?.proposed_count ?? 0, color: "#f4f4f5" },
+              { label: "In Progress", value: metaState?.in_progress_count ?? 0, color: "#facc15" },
+              { label: "Failed", value: metaState?.total_failed ?? 0, color: "#f87171" },
+            ].map((s, i) => (
+              <div key={i} style={{ background: "#27272a", borderRadius: 8, padding: 16 }}>
+                <div style={{ color: "#a1a1aa", fontSize: 13 }}>{s.label}</div>
+                <div style={{ fontSize: 24, fontWeight: "bold", color: s.color }}>{s.value}</div>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ display: "flex", gap: 12, marginBottom: 16 }}>
+            <button onClick={() => metaAction("propose")} disabled={loading} style={{ padding: "8px 16px", background: "#7c3aed", borderRadius: 8, border: "none", color: "white", cursor: "pointer", display: "flex", alignItems: "center", gap: 8, opacity: loading ? 0.5 : 1 }}>
+              <Plus size={16} /> Propose Improvement
             </button>
-            <button onClick={() => runMetaAction("auto")} disabled={loading} className="px-4 py-2 bg-zinc-700 rounded-lg hover:bg-zinc-600 disabled:opacity-50 flex items-center gap-2">
-              <Brain className="w-4 h-4" /> Auto-Experiment
+            <button onClick={() => metaAction("reset")} disabled={loading} style={{ padding: "8px 16px", background: "#dc2626", borderRadius: 8, border: "none", color: "white", cursor: "pointer", opacity: loading ? 0.5 : 1 }}>
+              Reset All
             </button>
           </div>
 
-          {/* Active Experiments */}
-          {metaState?.improvements?.filter((i: any) => i.status === "proposed" || i.status === "in_progress")?.length > 0 && (
-            <div className="space-y-2">
-              <h3 className="font-medium text-zinc-300">Pending Experiments</h3>
-              {metaState.improvements
-                .filter((i: any) => i.status === "proposed" || i.status === "in_progress")
-                .map((imp: any) => (
-                  <div key={imp.id} className="bg-zinc-800 rounded-lg p-4 flex items-center justify-between">
-                    <div>
-                      <div className="font-medium">{imp.name}</div>
-                      <div className="text-sm text-zinc-400">{imp.description}</div>
-                      <div className="text-xs text-zinc-500 mt-1">
-                        <span className="px-1.5 py-0.5 bg-zinc-700 rounded mr-2">{imp.category}</span>
-                        Target: {imp.target} | Difficulty: {imp.difficulty}/5
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className={`px-2 py-1 rounded text-xs ${imp.status === "proposed" ? "bg-zinc-700" : "bg-yellow-600"}`}>
-                        {imp.status}
-                      </span>
-                      {imp.status === "proposed" && (
-                        <button onClick={() => runMetaAction("start", { id: imp.id })} disabled={loading} className="px-3 py-1 bg-green-600 rounded text-xs hover:bg-green-500">
-                          Start
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
+          {/* Pending experiments */}
+          {metaState?.improvements?.filter((i: any) => i.status === "proposed" || i.status === "in_progress")?.map((imp: any) => (
+            <div key={imp.id} style={{ background: "#27272a", borderRadius: 8, padding: 16, marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <div style={{ fontWeight: 500 }}>{imp.name}</div>
+                <div style={{ fontSize: 13, color: "#a1a1aa" }}>{imp.description}</div>
+                <div style={{ fontSize: 11, color: "#71717a", marginTop: 4 }}>
+                  <span style={{ background: "#3f3f46", padding: "2px 6px", borderRadius: 4, marginRight: 8 }}>{imp.category}</span>
+                  {imp.target} | diff: {imp.difficulty}/5
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <span style={{ padding: "4px 8px", borderRadius: 4, fontSize: 11, background: imp.status === "proposed" ? "#3f3f46" : "#a16207" }}>
+                  {imp.status}
+                </span>
+                {imp.status === "proposed" && (
+                  <button onClick={() => metaAction("start", { id: imp.id })} disabled={loading} style={{ padding: "4px 12px", background: "#16a34a", borderRadius: 4, border: "none", color: "white", fontSize: 11, cursor: "pointer" }}>
+                    Start
+                  </button>
+                )}
+              </div>
             </div>
-          )}
+          ))}
         </div>
 
         {/* Experiment History */}
-        <div className="bg-zinc-900 rounded-xl p-6">
-          <h2 className="text-lg font-semibold mb-4 flex items-center gap-2"><Terminal className="w-5 h-5" /> Experiment History</h2>
-          <div className="max-h-80 overflow-y-auto space-y-2">
+        <div style={{ background: "#18181b", borderRadius: 12, padding: 24, marginBottom: 24 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+            <Terminal size={20} />
+            <h2 style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>Experiment History</h2>
+          </div>
+          <div style={{ maxHeight: 320, overflowY: "auto" }}>
             {metaState?.improvements
               ?.filter((i: any) => i.status === "completed" || i.status === "failed")
               ?.slice(-20).reverse()
               .map((imp: any) => (
-                <div key={imp.id} className="flex items-center gap-4 p-3 bg-zinc-800 rounded-lg text-sm">
-                  <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                    imp.status === "completed" ? "bg-green-900 text-green-400" : "bg-red-900 text-red-400"
-                  }`}>
-                    {imp.status === "completed" ? "improved" : "failed"}
+                <div key={imp.id} style={{ display: "flex", alignItems: "center", gap: 12, padding: 12, background: "#27272a", borderRadius: 8, marginBottom: 8, fontSize: 13 }}>
+                  <span style={{
+                    padding: "2px 8px", borderRadius: 4, fontSize: 11, fontWeight: 500,
+                    background: imp.status === "completed" ? "#14532d" : "#7f1d1d",
+                    color: imp.status === "completed" ? "#4ade80" : "#f87171",
+                  }}>
+                    {imp.status === "completed" ? "kept" : "discarded"}
                   </span>
-                  <span className="font-medium flex-1">{imp.name}</span>
-                  <span className="text-xs px-1.5 py-0.5 bg-zinc-700 rounded">{imp.category}</span>
-                  <span className="text-zinc-500 text-xs">{imp.target}</span>
-                  {imp.result && (
-                    <span className="text-zinc-500 text-xs truncate max-w-xs" title={imp.result}>{imp.result}</span>
-                  )}
+                  <span style={{ fontWeight: 500, flex: 1 }}>{imp.name}</span>
+                  <span style={{ fontSize: 11, background: "#3f3f46", padding: "2px 6px", borderRadius: 4 }}>{imp.category}</span>
+                  <span style={{ color: "#71717a", fontSize: 11 }}>{imp.target}</span>
                 </div>
-              ))}
-            {(!metaState?.improvements || metaState.improvements.filter((i: any) => i.status === "completed" || i.status === "failed").length === 0) && (
-              <div className="text-zinc-500 text-center py-8">No experiments run yet. Start the auto-evolution loop above!</div>
+              )) || (
+              <div style={{ color: "#71717a", textAlign: "center", padding: 32 }}>
+                No experiments yet. Hit "Start Auto-Evolution" above!
+              </div>
             )}
           </div>
         </div>
 
-        {/* LLM Training Controls (original autoresearch) */}
-        <div className="bg-zinc-900 rounded-xl p-6 border border-zinc-800">
-          <h2 className="text-lg font-semibold mb-4 flex items-center gap-2"><Cpu className="w-5 h-5" /> LLM Training Experiments</h2>
-          <p className="text-zinc-500 text-sm mb-4">Original Karpathy-style LLM training experiments (separate from Mission Control self-improvement)</p>
-          <div className="grid grid-cols-3 gap-4 mb-4">
-            <div className="bg-zinc-800 rounded-lg p-3">
-              <div className="text-zinc-500 text-xs">Best val_bpb</div>
-              <div className="text-xl font-bold text-green-400">{state?.best_val_bpb?.toFixed(3) || "—"}</div>
-            </div>
-            <div className="bg-zinc-800 rounded-lg p-3">
-              <div className="text-zinc-500 text-xs">Experiments</div>
-              <div className="text-xl font-bold text-blue-400">{state?.experiments?.length || 0}</div>
-            </div>
-            <div className="bg-zinc-800 rounded-lg p-3">
-              <div className="text-zinc-500 text-xs">Status</div>
-              <div className="text-xl font-bold text-zinc-400">{state?.status || "idle"}</div>
-            </div>
+        {/* LLM Training (original Karpathy-style) */}
+        <div style={{ background: "#18181b", borderRadius: 12, padding: 24, border: "1px solid #27272a" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+            <Cpu size={20} />
+            <h2 style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>LLM Training Experiments</h2>
           </div>
-          <div className="grid grid-cols-5 gap-3">
-            <button onClick={() => runAction("baseline")} disabled={loading} className="px-4 py-2 bg-blue-600 rounded-lg hover:bg-blue-500 disabled:opacity-50 flex items-center justify-center gap-2 text-sm">
-              <Play className="w-3 h-3" /> Baseline
-            </button>
-            <button onClick={() => runAction("next_gen")} disabled={loading} className="px-4 py-2 bg-green-600 rounded-lg hover:bg-green-500 disabled:opacity-50 flex items-center justify-center gap-2 text-sm">
-              <Plus className="w-3 h-3" /> Next Gen
-            </button>
-            <button onClick={() => runAction("stop")} disabled={loading} className="px-4 py-2 bg-red-600 rounded-lg hover:bg-red-500 disabled:opacity-50 flex items-center justify-center gap-2 text-sm">
-              <Square className="w-3 h-3" /> Stop
-            </button>
-            <button onClick={() => runAction("autonomous", { count: 10 })} disabled={loading} className="px-4 py-2 bg-purple-600 rounded-lg hover:bg-purple-500 disabled:opacity-50 flex items-center justify-center gap-2 text-sm">
-              <Zap className="w-3 h-3" /> Auto (10)
-            </button>
-            <button onClick={() => runAction("autonomous", { count: 100 })} disabled={loading} className="px-4 py-2 bg-purple-700 rounded-lg hover:bg-purple-600 disabled:opacity-50 flex items-center justify-center gap-2 text-sm">
-              <Activity className="w-3 h-3" /> Auto (100)
-            </button>
+          <p style={{ color: "#71717a", fontSize: 13, marginBottom: 16 }}>
+            Karpathy-style val_bpb optimization (separate from Mission Control self-improvement)
+          </p>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 16 }}>
+            {[
+              { label: "Best val_bpb", value: llmState?.best_val_bpb?.toFixed(3) ?? "—", color: "#4ade80" },
+              { label: "Experiments", value: llmState?.experiments?.length ?? 0, color: "#60a5fa" },
+              { label: "Status", value: llmState?.status ?? "idle", color: "#a1a1aa" },
+            ].map((s, i) => (
+              <div key={i} style={{ background: "#27272a", borderRadius: 8, padding: 12 }}>
+                <div style={{ color: "#71717a", fontSize: 11 }}>{s.label}</div>
+                <div style={{ fontSize: 20, fontWeight: "bold", color: s.color }}>{s.value}</div>
+              </div>
+            ))}
           </div>
-          {/* LLM Experiment History */}
-          {state?.experiments?.length > 0 && (
-            <div className="mt-4 max-h-48 overflow-y-auto space-y-2">
-              {state.experiments.slice(-10).reverse().map((exp: any, idx: number) => (
-                <div key={idx} className="flex items-center gap-4 p-2 bg-zinc-800 rounded-lg text-xs">
-                  <span className="text-zinc-500 w-12">Gen {exp.gen}</span>
-                  <span className={`font-mono ${exp.improved ? 'text-green-400' : 'text-zinc-400'}`}>
-                    {exp.val_bpb ? exp.val_bpb.toFixed(3) : 'N/A'}
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12 }}>
+            {[
+              { label: "Baseline", action: "baseline", icon: Play, bg: "#2563eb" },
+              { label: "Next Gen", action: "next_gen", icon: Plus, bg: "#16a34a" },
+              { label: "Stop", action: "stop", icon: Square, bg: "#dc2626" },
+              { label: "Auto (10)", action: "autonomous", extra: { count: 10 }, icon: Zap, bg: "#7c3aed" },
+              { label: "Auto (100)", action: "autonomous", extra: { count: 100 }, icon: Activity, bg: "#6d28d9" },
+            ].map((btn, i) => {
+              const Icon = btn.icon;
+              return (
+                <button key={i} onClick={() => llmAction(btn.action, btn.extra || {})} disabled={loading}
+                  style={{ padding: "8px 12px", background: btn.bg, borderRadius: 8, border: "none", color: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, fontSize: 13, opacity: loading ? 0.5 : 1 }}>
+                  <Icon size={14} /> {btn.label}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* LLM History */}
+          {(llmState?.experiments?.length ?? 0) > 0 && (
+            <div style={{ marginTop: 16, maxHeight: 192, overflowY: "auto" }}>
+              {llmState.experiments.slice(-10).reverse().map((exp: any, i: number) => (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, padding: 8, background: "#27272a", borderRadius: 8, marginBottom: 4, fontSize: 11 }}>
+                  <span style={{ color: "#71717a", width: 48 }}>Gen {exp.gen}</span>
+                  <span style={{ fontFamily: "monospace", color: exp.improved ? "#4ade80" : "#a1a1aa" }}>
+                    {exp.val_bpb?.toFixed(3) ?? "N/A"}
                   </span>
-                  <span className={`px-2 py-0.5 rounded text-xs ${exp.status === 'complete' ? 'bg-green-900 text-green-400' : exp.status === 'failed' ? 'bg-red-900 text-red-400' : 'bg-yellow-900 text-yellow-400'}`}>
-                    {exp.status}
+                  <span style={{
+                    padding: "2px 6px", borderRadius: 4, fontSize: 10,
+                    background: exp.improved ? "#14532d" : "#3f3f46",
+                    color: exp.improved ? "#4ade80" : "#a1a1aa",
+                  }}>
+                    {exp.improved ? "kept" : "discarded"}
                   </span>
-                  <span className="text-zinc-500 flex-1 truncate">{exp.description}</span>
-                  {exp.improved && <span className="text-xs text-green-400">improved</span>}
+                  <span style={{ color: "#71717a", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {exp.description}
+                  </span>
                 </div>
               ))}
             </div>
