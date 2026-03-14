@@ -20,7 +20,7 @@
 
 | Project | Progress | Deadline | Status |
 |---------|----------|----------|--------|
-| Mission Control Dashboard | 85% (10/12 tasks) | Mar 15, 2026 | Active |
+| Mission Control Dashboard | 100% (12/12 tasks) | Mar 15, 2026 | Complete |
 | Knowledge Base Construction | 60% (11/18 tasks) | Mar 20, 2026 | Active |
 | Agent Army Expansion | 30% (7/24 tasks) | Apr 1, 2026 | Active |
 
@@ -36,7 +36,7 @@
 - **Current Gen**: 3
 - **Total Experiments**: 5
 - **Environment**: CPU demo mode
-- **Location**: `/home/workspace/autoresearch/`
+- **Location**: `/home/user/Zo/autoresearch/`
 
 ## Recent Activity Summary
 

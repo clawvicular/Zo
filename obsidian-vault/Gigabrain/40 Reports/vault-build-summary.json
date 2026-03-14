@@ -2,11 +2,11 @@
   "enabled": true,
   "generated_at": "2026-03-13T03:57:39.304Z",
   "run_id": "setup-first-run",
-  "workspace_root": "/home/workspace",
-  "output_dir": "/home/workspace/output",
-  "vault_root": "/home/workspace/obsidian-vault",
+  "workspace_root": "/home/user/Zo",
+  "output_dir": "/home/user/Zo/output",
+  "vault_root": "/home/user/Zo/obsidian-vault",
   "subdir": "Gigabrain",
-  "mirror_root": "/home/workspace/obsidian-vault/Gigabrain",
+  "mirror_root": "/home/user/Zo/obsidian-vault/Gigabrain",
   "source_files": 0,
   "active_nodes": 0,
   "entities": 0,
@@ -79,8 +79,8 @@
   },
   "manifest": {
     "generated_at": "2026-03-13T03:57:39.304Z",
-    "vault_root": "/home/workspace/obsidian-vault",
-    "mirror_root": "/home/workspace/obsidian-vault/Gigabrain",
+    "vault_root": "/home/user/Zo/obsidian-vault",
+    "mirror_root": "/home/user/Zo/obsidian-vault/Gigabrain",
     "generated_files": [
       "00 Home/Home.md",
       "30 Views/Current State.md",
@@ -102,5 +102,5 @@
     "source_files": 0,
     "active_nodes": 0
   },
-  "surface_summary_path": "/home/workspace/output/memory-surface-summary.json"
+  "surface_summary_path": "/home/user/Zo/output/memory-surface-summary.json"
 }

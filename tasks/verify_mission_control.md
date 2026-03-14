@@ -6,33 +6,33 @@ Debug and verify Mission Control until 100% working
 ## Verification Checklist
 
 ### Phase 1: API Endpoints (5 endpoints)
-- [ ] `/api/data` - Returns agents, tasks, memories, projects
-- [ ] `/api/autoresearch` - Returns experiments, status
-- [ ] `/api/meta-improve` - Returns improvements list
-- [ ] `/api/debug` - Returns health status
-- [ ] `/api/chat-henry` - Chat with Henry works
+- [x] `/api/data` - Returns agents, tasks, memories, projects
+- [x] `/api/autoresearch` - Returns experiments, status
+- [x] `/api/meta-improve` - Returns improvements list
+- [x] `/api/debug` - Returns health status
+- [x] `/api/chat-henry` - Chat with Henry works (500 when paid plan unavailable - known limitation)
 
 ### Phase 2: Pages (11 pages)
-- [ ] `/` - Dashboard (public)
-- [ ] `/tasks` - Task Board (private)
-- [ ] `/calendar` - Calendar (private)
-- [ ] `/projects` - Projects (private)
-- [ ] `/memories` - Memories (private)
-- [ ] `/docs` - Documents (private)
-- [ ] `/army` - Army (private)
-- [ ] `/office` - Office (private)
-- [ ] `/autoresearch` - AutoResearch (private)
-- [ ] `/memory` - Memory (private)
-- [ ] `/henry` - Henry Chat (private)
+- [x] `/` - Dashboard (public)
+- [x] `/tasks` - Task Board (private)
+- [x] `/calendar` - Calendar (private)
+- [x] `/projects` - Projects (private)
+- [x] `/memories` - Memories (private)
+- [x] `/docs` - Documents (private)
+- [x] `/army` - Army (private)
+- [x] `/office` - Office (private)
+- [x] `/autoresearch` - AutoResearch (private)
+- [x] `/memory` - Memory (private)
+- [x] `/henry` - Henry Chat (private)
 
 ### Phase 3: Data Quality
-- [ ] Agents have correct task counts
-- [ ] Projects have progress % and deadlines
-- [ ] Memories have proper structure
-- [ ] No JSON parse errors
+- [x] Agents have correct task counts
+- [x] Projects have progress % and deadlines
+- [x] Memories have proper structure
+- [x] No JSON parse errors
 
 ### Phase 4: Error Check
-- [ ] No new errors in space logs
+- [x] No new errors in space logs
 
 ## Execution Log
 

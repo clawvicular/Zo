@@ -1,7 +1,7 @@
 # Gigabrain Memory Surface
 
 - generated_at: 2026-03-13T03:57:39.304Z
-- vault_root: /home/workspace/obsidian-vault
+- vault_root: /home/user/Zo/obsidian-vault
 - subdir: Gigabrain
 - active_nodes: 0
 - entities: 0
@@ -32,8 +32,6 @@
 - [[30 Views/Important People]]
 - [[30 Views/Important Projects]]
 - [[30 Views/Native Notes]]
-- [[50 Briefings/Session Brief]]
-
 ## Reports
 
 - [[40 Reports/vault-build-summary]]
