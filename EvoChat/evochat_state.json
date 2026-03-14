@@ -1,19 +1,19 @@
 {
-  "start_time": 1864.729517358,
-  "max_seconds": 1200,
-  "exp_seconds": 1200,
+  "start_time": 1773462490.6767642,
+  "max_seconds": 3600,
+  "exp_seconds": 300,
   "best_score": 93.0,
   "iterations": 1,
-  "goal": "viral TikTok idea generator that makes moneys",
-  "scaffolding": "Iteration 1 best",
+  "goal": "viral TikTok idea generator",
+  "scaffolding": "",
   "results": [
     {
       "iteration": 1,
       "score": 93.0,
-      "runtime": 2.001455283000041,
-      "artifact_path": "artifacts/evochat_000_1773365840.json",
-      "timestamp": "2026-03-13 01:37:20",
-      "goal": "viral TikTok idea generator that makes moneys",
+      "runtime": 2.0009922981262207,
+      "artifact_path": "artifacts/evochat_000_1773462490.json",
+      "timestamp": "2026-03-14 04:28:10",
+      "goal": "viral TikTok idea generator",
       "scaffolding": "",
       "ideas": [
         "AI-powered trend spotter that identifies rising sounds before they go viral",
