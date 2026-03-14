@@ -3,7 +3,7 @@
 - timestamp: 2026-03-13T03:57:39.304Z
 - run_id: `setup-first-run`
 - enabled: true
-- vault_root: /home/workspace/obsidian-vault
+- vault_root: /home/user/Zo/obsidian-vault
 - subdir: Gigabrain
 - source_files: 0
 - active_nodes: 0
