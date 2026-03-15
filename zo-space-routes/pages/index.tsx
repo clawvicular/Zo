@@ -43,6 +43,7 @@ function Nav({ current }: { current: string }) {
 
 export default function Dashboard() {
   const [data, setData] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
   const [editingMission, setEditingMission] = useState(false);
   const [missionDraft, setMissionDraft] = useState("");
 
@@ -57,7 +58,8 @@ export default function Dashboard() {
       const res = await fetch("/api/data");
       const json = await res.json();
       setData(json);
-    } catch {}
+      setError(null);
+    } catch { setError("Failed to load data"); }
   }
 
   async function saveMission() {
@@ -74,8 +76,13 @@ export default function Dashboard() {
 
   if (!data) {
     return (
-      <div style={{ minHeight: "100vh", background: "#09090b", color: "#a1a1aa", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, -apple-system, sans-serif" }}>
-        Loading Mission Control...
+      <div style={{ minHeight: "100vh", background: "#09090b", color: "#a1a1aa", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, -apple-system, sans-serif", flexDirection: "column", gap: 12 }}>
+        {error ? (
+          <>
+            <span style={{ color: "#ef4444" }}>{error}</span>
+            <button onClick={() => { setError(null); fetchData(); }} style={{ background: "#27272a", color: "#f4f4f5", border: "none", borderRadius: 6, padding: "6px 16px", cursor: "pointer", fontSize: 13 }}>Retry</button>
+          </>
+        ) : "Loading Mission Control..."}
       </div>
     );
   }

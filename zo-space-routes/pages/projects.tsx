@@ -31,6 +31,7 @@ function Nav({ current }: { current: string }) {
 
 export default function Projects() {
   const [data, setData] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
 
   useEffect(() => {
@@ -44,13 +45,19 @@ export default function Projects() {
       const res = await fetch("/api/data");
       const json = await res.json();
       setData(json);
-    } catch {}
+      setError(null);
+    } catch { setError("Failed to load data"); }
   }
 
   if (!data) {
     return (
-      <div style={{ minHeight: "100vh", background: "#09090b", color: "#a1a1aa", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, -apple-system, sans-serif" }}>
-        Loading...
+      <div style={{ minHeight: "100vh", background: "#09090b", color: "#a1a1aa", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, -apple-system, sans-serif", flexDirection: "column", gap: 12 }}>
+        {error ? (
+          <>
+            <span style={{ color: "#ef4444" }}>{error}</span>
+            <button onClick={() => { setError(null); fetchData(); }} style={{ background: "#27272a", color: "#f4f4f5", border: "none", borderRadius: 6, padding: "6px 16px", cursor: "pointer", fontSize: 13 }}>Retry</button>
+          </>
+        ) : "Loading..."}
       </div>
     );
   }

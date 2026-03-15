@@ -123,27 +123,32 @@ export default function Henry() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<"ready" | "processing" | "error">("ready");
   const [heartbeat, setHeartbeat] = useState<any>(null);
+  const [initialLoaded, setInitialLoaded] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const sendingRef = useRef(false); // Synchronous guard against double-send
 
   // Load history + heartbeat state on mount, poll every 30s
+  function loadState() {
+    // Skip polling while a message is in flight to avoid overwriting optimistic state
+    if (sendingRef.current) return;
+    fetch("/api/chat-henry")
+      .then((r) => r.json())
+      .then((data) => {
+        if (sendingRef.current) return; // Re-check after async
+        setError(null);
+        setInitialLoaded(true);
+        if (data.history?.length) setMessages(data.history);
+        setStatus(data.status || "ready");
+        if (data.heartbeat) setHeartbeat(data.heartbeat);
+      })
+      .catch(() => { setError("Failed to load data"); });
+  }
+
   useEffect(() => {
-    function loadState() {
-      // Skip polling while a message is in flight to avoid overwriting optimistic state
-      if (sendingRef.current) return;
-      fetch("/api/chat-henry")
-        .then((r) => r.json())
-        .then((data) => {
-          if (sendingRef.current) return; // Re-check after async
-          if (data.history?.length) setMessages(data.history);
-          setStatus(data.status || "ready");
-          if (data.heartbeat) setHeartbeat(data.heartbeat);
-        })
-        .catch(() => {});
-    }
     loadState();
     const interval = setInterval(loadState, 30000);
     return () => clearInterval(interval);
@@ -219,6 +224,19 @@ export default function Henry() {
       body: JSON.stringify({ action: "clear" }),
     }).catch(() => {});
     setMessages([]);
+  }
+
+  if (!initialLoaded) {
+    return (
+      <div style={{ minHeight: "100vh", background: "#09090b", color: "#a1a1aa", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, -apple-system, sans-serif", flexDirection: "column", gap: 12 }}>
+        {error ? (
+          <>
+            <span style={{ color: "#ef4444" }}>{error}</span>
+            <button onClick={() => { setError(null); loadState(); }} style={{ background: "#27272a", color: "#f4f4f5", border: "none", borderRadius: 6, padding: "6px 16px", cursor: "pointer", fontSize: 13 }}>Retry</button>
+          </>
+        ) : "Loading..."}
+      </div>
+    );
   }
 
   return (

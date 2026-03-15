@@ -1,12 +1,11 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 
 // Only use icons known to exist in all lucide-react versions
-import { Activity, Brain, Plus, Play, Square, Terminal, Cpu, Wrench, Zap, Clock } from "lucide-react";
+import { Brain, Plus, Play, Square, Terminal, Cpu, Wrench, Zap, Clock } from "lucide-react";
 
 const CYCLE_MS = 5 * 60 * 1000; // 5 minutes
 
 export default function AutoResearch() {
-  const [llmState, setLlmState] = useState<any>(null);
   const [metaState, setMetaState] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -33,12 +32,13 @@ export default function AutoResearch() {
         return null;
       }
     };
-    const [metaRes, llmRes] = await Promise.allSettled([
-      safeFetch("/api/meta-improve"),
-      safeFetch("/api/autoresearch"),
-    ]);
-    if (metaRes.status === "fulfilled" && metaRes.value) setMetaState(metaRes.value);
-    if (llmRes.status === "fulfilled" && llmRes.value) setLlmState(llmRes.value);
+    const metaRes = await safeFetch("/api/meta-improve");
+    if (metaRes) {
+      setMetaState(metaRes);
+      setError(null);
+    } else {
+      setError("Failed to load data");
+    }
   }, []);
 
   const log = useCallback((msg: string) => {
@@ -173,21 +173,6 @@ export default function AutoResearch() {
     setLoading(false);
   };
 
-  const llmAction = async (action: string, extra = {}) => {
-    setLoading(true);
-    try {
-      await fetch("/api/autoresearch", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action, ...extra }),
-      });
-      await fetchState();
-    } catch (e: any) {
-      setError(e?.message || "Request failed");
-    }
-    setLoading(false);
-  };
-
   const fmtTime = (s: number) => {
     const m = Math.floor(s / 60);
     return m + ":" + (s % 60).toString().padStart(2, "0");
@@ -196,6 +181,19 @@ export default function AutoResearch() {
   const hbStatus = metaState?.heartbeat?.status || "idle";
   const llmConnected = metaState?.llm_connected || false;
   const hbError = metaState?.heartbeat?.error || null;
+
+  if (!metaState) {
+    return (
+      <div style={{ minHeight: "100vh", background: "#09090b", color: "#a1a1aa", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, -apple-system, sans-serif", flexDirection: "column", gap: 12 }}>
+        {error ? (
+          <>
+            <span style={{ color: "#ef4444" }}>{error}</span>
+            <button onClick={() => { setError(null); fetchState(); }} style={{ background: "#27272a", color: "#f4f4f5", border: "none", borderRadius: 6, padding: "6px 16px", cursor: "pointer", fontSize: 13 }}>Retry</button>
+          </>
+        ) : "Loading..."}
+      </div>
+    );
+  }
 
   return (
     <div style={{ minHeight: "100vh", background: "#09090b", color: "#f4f4f5", padding: 24 }}>
@@ -513,71 +511,6 @@ export default function AutoResearch() {
           ))}
         </div>
 
-        {/* LLM Training (original Karpathy-style) */}
-        <div style={{ background: "#18181b", borderRadius: 12, padding: 24, border: "1px solid #27272a" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
-            <Cpu size={20} />
-            <h2 style={{ fontSize: 18, fontWeight: 600, margin: 0 }}>LLM Training Experiments</h2>
-          </div>
-          <p style={{ color: "#71717a", fontSize: 13, marginBottom: 16 }}>
-            Karpathy-style val_bpb optimization (separate from Mission Control self-improvement)
-          </p>
-
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16, marginBottom: 16 }}>
-            {[
-              { label: "Best val_bpb", value: llmState?.best_val_bpb?.toFixed(3) ?? "\u2014", color: "#4ade80" },
-              { label: "Experiments", value: llmState?.experiments?.length ?? 0, color: "#60a5fa" },
-              { label: "Status", value: llmState?.status ?? "idle", color: "#a1a1aa" },
-            ].map((s, i) => (
-              <div key={i} style={{ background: "#27272a", borderRadius: 8, padding: 12 }}>
-                <div style={{ color: "#71717a", fontSize: 11 }}>{s.label}</div>
-                <div style={{ fontSize: 20, fontWeight: "bold", color: s.color }}>{s.value}</div>
-              </div>
-            ))}
-          </div>
-
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 12 }}>
-            {[
-              { label: "Baseline", action: "baseline", icon: Play, bg: "#2563eb", extra: {} as any },
-              { label: "Next Gen", action: "next_gen", icon: Plus, bg: "#16a34a", extra: {} as any },
-              { label: "Stop", action: "stop", icon: Square, bg: "#dc2626", extra: {} as any },
-              { label: "Auto (10)", action: "autonomous", icon: Zap, bg: "#7c3aed", extra: { count: 10 } as any },
-              { label: "Auto (100)", action: "autonomous", icon: Activity, bg: "#6d28d9", extra: { count: 100 } as any },
-            ].map((btn, i) => {
-              const Icon = btn.icon;
-              return (
-                <button key={i} onClick={() => llmAction(btn.action, btn.extra)} disabled={loading}
-                  style={{ padding: "8px 12px", background: btn.bg, borderRadius: 8, border: "none", color: "white", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, fontSize: 13, opacity: loading ? 0.5 : 1 }}>
-                  <Icon size={14} /> {btn.label}
-                </button>
-              );
-            })}
-          </div>
-
-          {/* LLM History */}
-          {(llmState?.experiments?.length ?? 0) > 0 && (
-            <div style={{ marginTop: 16, maxHeight: 192, overflowY: "auto" }}>
-              {llmState.experiments.slice(-10).reverse().map((exp: any, i: number) => (
-                <div key={i} style={{ display: "flex", alignItems: "center", gap: 12, padding: 8, background: "#27272a", borderRadius: 8, marginBottom: 4, fontSize: 11 }}>
-                  <span style={{ color: "#71717a", width: 48 }}>Gen {exp.gen}</span>
-                  <span style={{ fontFamily: "monospace", color: exp.improved ? "#4ade80" : "#a1a1aa" }}>
-                    {exp.val_bpb?.toFixed(3) ?? "N/A"}
-                  </span>
-                  <span style={{
-                    padding: "2px 6px", borderRadius: 4, fontSize: 10,
-                    background: exp.improved ? "#14532d" : "#3f3f46",
-                    color: exp.improved ? "#4ade80" : "#a1a1aa",
-                  }}>
-                    {exp.improved ? "kept" : "discarded"}
-                  </span>
-                  <span style={{ color: "#71717a", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {exp.description}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
       </div>
     </div>
   );

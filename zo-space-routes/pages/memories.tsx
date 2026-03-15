@@ -43,6 +43,7 @@ const TYPE_COLORS: Record<string, { bg: string; text: string }> = {
 
 export default function Memories() {
   const [data, setData] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [filterAgent, setFilterAgent] = useState("all");
   const [filterType, setFilterType] = useState("all");
@@ -58,13 +59,19 @@ export default function Memories() {
       const res = await fetch("/api/data");
       const json = await res.json();
       setData(json);
-    } catch {}
+      setError(null);
+    } catch { setError("Failed to load data"); }
   }
 
   if (!data) {
     return (
-      <div style={{ minHeight: "100vh", background: "#09090b", color: "#a1a1aa", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, -apple-system, sans-serif" }}>
-        Loading...
+      <div style={{ minHeight: "100vh", background: "#09090b", color: "#a1a1aa", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, -apple-system, sans-serif", flexDirection: "column", gap: 12 }}>
+        {error ? (
+          <>
+            <span style={{ color: "#ef4444" }}>{error}</span>
+            <button onClick={() => { setError(null); fetchData(); }} style={{ background: "#27272a", color: "#f4f4f5", border: "none", borderRadius: 6, padding: "6px 16px", cursor: "pointer", fontSize: 13 }}>Retry</button>
+          </>
+        ) : "Loading..."}
       </div>
     );
   }
@@ -118,7 +125,26 @@ export default function Memories() {
         {filtered.map((m: any) => {
           const tc = TYPE_COLORS[m.type] || { bg: "#27272a", text: "#a1a1aa" };
           return (
-            <div key={m.id} style={{ background: "#18181b", border: "1px solid #27272a", borderRadius: 10, padding: 16 }}>
+            <div key={m.id} style={{ background: "#18181b", border: "1px solid #27272a", borderRadius: 10, padding: 16, position: "relative" }}>
+              <button
+                onClick={async () => {
+                  if (!window.confirm("Delete this memory?")) return;
+                  try {
+                    await fetch("/api/data", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ action: "delete_memory", memory_id: m.id }),
+                    });
+                    fetchData();
+                  } catch {}
+                }}
+                style={{ position: "absolute", top: 8, right: 8, background: "transparent", border: "none", color: "#71717a", fontSize: 14, cursor: "pointer", padding: "2px 6px", lineHeight: 1 }}
+                onMouseEnter={(e) => (e.currentTarget.style.color = "#ef4444")}
+                onMouseLeave={(e) => (e.currentTarget.style.color = "#71717a")}
+                title="Delete memory"
+              >
+                ×
+              </button>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
                 <span style={{ fontSize: 11, fontWeight: 600, color: tc.text, background: tc.bg, padding: "2px 10px", borderRadius: 4 }}>{m.type}</span>
                 <span style={{ fontSize: 13, fontWeight: 600 }}>{m.agent}</span>

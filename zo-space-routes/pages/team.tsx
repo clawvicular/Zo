@@ -31,7 +31,35 @@ function Nav({ current }: { current: string }) {
 
 export default function Team() {
   const [data, setData] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<"org" | "office">("org");
+  const [editingAgent, setEditingAgent] = useState<string | null>(null);
+  const [editStatus, setEditStatus] = useState("");
+  const [editSchedule, setEditSchedule] = useState("");
+
+  function startEditing(agent: any) {
+    setEditingAgent(agent.id);
+    setEditStatus(agent.status || "active");
+    setEditSchedule(agent.schedule || "");
+  }
+
+  function cancelEditing() {
+    setEditingAgent(null);
+    setEditStatus("");
+    setEditSchedule("");
+  }
+
+  async function saveAgent() {
+    try {
+      await fetch("/api/data", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "update_agent", agent_id: editingAgent, status: editStatus, schedule: editSchedule }),
+      });
+      setEditingAgent(null);
+      fetchData();
+    } catch { setError("Failed to save agent"); }
+  }
 
   useEffect(() => {
     fetchData();
@@ -44,13 +72,19 @@ export default function Team() {
       const res = await fetch("/api/data");
       const json = await res.json();
       setData(json);
-    } catch {}
+      setError(null);
+    } catch { setError("Failed to load data"); }
   }
 
   if (!data) {
     return (
-      <div style={{ minHeight: "100vh", background: "#09090b", color: "#a1a1aa", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, -apple-system, sans-serif" }}>
-        Loading...
+      <div style={{ minHeight: "100vh", background: "#09090b", color: "#a1a1aa", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, -apple-system, sans-serif", flexDirection: "column", gap: 12 }}>
+        {error ? (
+          <>
+            <span style={{ color: "#ef4444" }}>{error}</span>
+            <button onClick={() => { setError(null); fetchData(); }} style={{ background: "#27272a", color: "#f4f4f5", border: "none", borderRadius: 6, padding: "6px 16px", cursor: "pointer", fontSize: 13 }}>Retry</button>
+          </>
+        ) : "Loading..."}
       </div>
     );
   }
@@ -138,30 +172,73 @@ export default function Team() {
                   opacity: agent.status === "paused" ? 0.5 : 1,
                 }}
               >
-                <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
-                  <span style={{ fontSize: 32 }}>{agent.emoji}</span>
-                  <div>
-                    <div style={{ fontSize: 16, fontWeight: 600 }}>{agent.name}</div>
-                    <div style={{ fontSize: 12, color: "#71717a" }}>{agent.role}</div>
-                  </div>
-                  <span style={{ marginLeft: "auto", width: 10, height: 10, borderRadius: "50%", background: agent.status === "active" ? "#4ade80" : agent.status === "paused" ? "#facc15" : "#ef4444" }} />
-                </div>
+                {editingAgent === agent.id ? (
+                  <>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+                      <span style={{ fontSize: 32 }}>{agent.emoji}</span>
+                      <div>
+                        <div style={{ fontSize: 16, fontWeight: 600 }}>{agent.name}</div>
+                        <div style={{ fontSize: 12, color: "#71717a" }}>{agent.role}</div>
+                      </div>
+                    </div>
 
-                <div style={{ fontSize: 12, color: "#71717a", marginBottom: 8 }}>{agent.model}</div>
+                    <div style={{ marginBottom: 10 }}>
+                      <label style={{ fontSize: 11, color: "#71717a", display: "block", marginBottom: 4 }}>Status</label>
+                      <select
+                        value={editStatus}
+                        onChange={(e) => setEditStatus(e.target.value)}
+                        style={{ width: "100%", background: "#09090b", color: "#f4f4f5", border: "1px solid #27272a", borderRadius: 6, padding: "6px 8px", fontSize: 12, outline: "none" }}
+                      >
+                        <option value="active">active</option>
+                        <option value="paused">paused</option>
+                        <option value="error">error</option>
+                      </select>
+                    </div>
 
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
-                  {agent.capabilities.map((c: string) => (
-                    <span key={c} style={{ fontSize: 10, background: "#27272a", color: "#a1a1aa", padding: "2px 8px", borderRadius: 4 }}>{c}</span>
-                  ))}
-                </div>
+                    <div style={{ marginBottom: 12 }}>
+                      <label style={{ fontSize: 11, color: "#71717a", display: "block", marginBottom: 4 }}>Schedule</label>
+                      <input
+                        type="text"
+                        value={editSchedule}
+                        onChange={(e) => setEditSchedule(e.target.value)}
+                        style={{ width: "100%", background: "#09090b", color: "#f4f4f5", border: "1px solid #27272a", borderRadius: 6, padding: "6px 8px", fontSize: 12, outline: "none", boxSizing: "border-box" }}
+                      />
+                    </div>
 
-                <div style={{ fontSize: 12, color: "#52525b", marginBottom: 4 }}>Schedule: {agent.schedule}</div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button onClick={saveAgent} style={{ flex: 1, background: "#27272a", color: "#f4f4f5", border: "1px solid #3f3f46", borderRadius: 6, padding: "6px 12px", fontSize: 11, cursor: "pointer" }}>Save</button>
+                      <button onClick={cancelEditing} style={{ flex: 1, background: "transparent", color: "#a1a1aa", border: "1px solid #27272a", borderRadius: 6, padding: "6px 12px", fontSize: 11, cursor: "pointer" }}>Cancel</button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 12 }}>
+                      <span style={{ fontSize: 32 }}>{agent.emoji}</span>
+                      <div>
+                        <div style={{ fontSize: 16, fontWeight: 600 }}>{agent.name}</div>
+                        <div style={{ fontSize: 12, color: "#71717a" }}>{agent.role}</div>
+                      </div>
+                      <span style={{ marginLeft: "auto", width: 10, height: 10, borderRadius: "50%", background: agent.status === "active" ? "#4ade80" : agent.status === "paused" ? "#facc15" : "#ef4444" }} />
+                    </div>
 
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#a1a1aa", paddingTop: 8, borderTop: "1px solid #27272a" }}>
-                  <span>{agent.tasks_active} active</span>
-                  <span>{agent.tasks_completed} done</span>
-                  <span>{agent.last_active}</span>
-                </div>
+                    <div style={{ fontSize: 12, color: "#71717a", marginBottom: 8 }}>{agent.model}</div>
+
+                    <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 12 }}>
+                      {agent.capabilities.map((c: string) => (
+                        <span key={c} style={{ fontSize: 10, background: "#27272a", color: "#a1a1aa", padding: "2px 8px", borderRadius: 4 }}>{c}</span>
+                      ))}
+                    </div>
+
+                    <div style={{ fontSize: 12, color: "#52525b", marginBottom: 4 }}>Schedule: {agent.schedule}</div>
+
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, color: "#a1a1aa", paddingTop: 8, borderTop: "1px solid #27272a" }}>
+                      <span>{agent.tasks_active} active</span>
+                      <span>{agent.tasks_completed} done</span>
+                      <span>{agent.last_active}</span>
+                      <button onClick={() => startEditing(agent)} style={{ background: "transparent", color: "#a1a1aa", border: "1px solid #27272a", borderRadius: 4, padding: "2px 8px", fontSize: 11, cursor: "pointer" }}>Edit</button>
+                    </div>
+                  </>
+                )}
               </div>
             ))}
           </div>

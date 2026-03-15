@@ -170,7 +170,9 @@ const targets = Object.keys(routeSnapshots);
 // LLM Integration — Minimax 2.5 as the autoresearch brain
 // ============================================================================
 
-async function callLLM(systemPrompt: string, userPrompt: string): Promise<string | null> {
+type LLMResult = { content: string | null; tokens_used: number };
+
+async function callLLM(systemPrompt: string, userPrompt: string): Promise<LLMResult> {
   const apiKey = (globalThis as any).process?.env?.ZO_API_KEY
     || (globalThis as any).process?.env?.MINIMAX_API_KEY
     || (globalThis as any).process?.env?.ZO_CLIENT_IDENTITY_TOKEN;
@@ -179,7 +181,7 @@ async function callLLM(systemPrompt: string, userPrompt: string): Promise<string
 
   if (!apiKey) {
     heartbeat.llm_connected = false;
-    return null;
+    return { content: null, tokens_used: 0 };
   }
 
   // Validate API key format — reject JWTs and tokens with control chars
@@ -187,7 +189,7 @@ async function callLLM(systemPrompt: string, userPrompt: string): Promise<string
   if (/[\r\n\x00-\x1f]/.test(apiKey) || apiKey.startsWith("eyJ")) {
     heartbeat.llm_connected = false;
     heartbeat.error = "Invalid API key format — set ZO_API_KEY or MINIMAX_API_KEY with a valid Minimax key";
-    return null;
+    return { content: null, tokens_used: 0 };
   }
 
   try {
@@ -211,23 +213,25 @@ async function callLLM(systemPrompt: string, userPrompt: string): Promise<string
     if (!res.ok) {
       heartbeat.llm_connected = false;
       heartbeat.error = `LLM API returned ${res.status}`;
-      return null;
+      return { content: null, tokens_used: 0 };
     }
 
     const text = await res.text();
     const data = JSON.parse(text);
     heartbeat.llm_connected = true;
     heartbeat.error = null;
-    return data.choices?.[0]?.message?.content || null;
+    const content = data.choices?.[0]?.message?.content || null;
+    const tokens_used = data.usage?.total_tokens || 0;
+    return { content, tokens_used };
   } catch (e: any) {
     heartbeat.llm_connected = false;
     heartbeat.error = e?.message || "LLM network error";
-    return null;
+    return { content: null, tokens_used: 0 };
   }
 }
 
 // Ask LLM to propose an improvement to a target
-async function proposeLLMImprovement(targetKey: string): Promise<{ name: string; description: string; category: string; improvedCode: string } | null> {
+async function proposeLLMImprovement(targetKey: string): Promise<{ name: string; description: string; category: string; improvedCode: string; tokens_used: number } | null> {
   const currentCode = routeSnapshots[targetKey];
   if (!currentCode) return null;
 
@@ -247,7 +251,7 @@ ${currentCode}
 
 Propose ONE improvement. Keep the code working and compatible with React + inline styles. Return only valid JSON.`;
 
-  const response = await callLLM(systemPrompt, userPrompt);
+  const { content: response, tokens_used } = await callLLM(systemPrompt, userPrompt);
   if (!response) return null;
 
   try {
@@ -258,6 +262,7 @@ Propose ONE improvement. Keep the code working and compatible with React + inlin
       description: parsed.description || "",
       category: parsed.category || "feature",
       improvedCode: parsed.improved_code || "",
+      tokens_used,
     };
   } catch {
     return null;
@@ -265,7 +270,7 @@ Propose ONE improvement. Keep the code working and compatible with React + inlin
 }
 
 // Ask LLM to evaluate an improvement
-async function evaluateLLMImprovement(targetKey: string, originalCode: string, improvedCode: string, improvementDescription: string): Promise<{ score: number; reasoning: string } | null> {
+async function evaluateLLMImprovement(targetKey: string, originalCode: string, improvedCode: string, improvementDescription: string): Promise<{ score: number; reasoning: string; tokens_used: number } | null> {
   const systemPrompt = `You are a senior code reviewer evaluating improvements to a Mission Control dashboard.
 
 Score the improvement on a 0-100 scale based on:
@@ -294,7 +299,7 @@ ${improvedCode}
 
 Score this change. Return only valid JSON.`;
 
-  const response = await callLLM(systemPrompt, userPrompt);
+  const { content: response, tokens_used } = await callLLM(systemPrompt, userPrompt);
   if (!response) return null;
 
   try {
@@ -303,6 +308,7 @@ Score this change. Return only valid JSON.`;
     return {
       score: typeof parsed.score === "number" ? Math.min(100, Math.max(0, parsed.score)) : 50,
       reasoning: parsed.reasoning || "No reasoning provided",
+      tokens_used,
     };
   } catch {
     return null;
@@ -342,9 +348,10 @@ function fallbackEvaluate(name: string, category: string, difficulty: number, cu
 // The core auto-cycle: propose → experiment → evaluate → keep/discard
 // ============================================================================
 
-async function runAutoCycle(): Promise<{ success: boolean; result: string; experiment: Experiment; improvement: Improvement }> {
+async function runAutoCycle(): Promise<{ success: boolean; result: string; experiment: Experiment; improvement: Improvement; tokens_used: number }> {
   const targetKey = targets[Math.floor(Math.random() * targets.length)];
   const currentCode = routeSnapshots[targetKey] || "";
+  let totalTokens = 0;
 
   heartbeat.status = "proposing";
   heartbeat.last_active = Date.now();
@@ -365,6 +372,7 @@ async function runAutoCycle(): Promise<{ success: boolean; result: string; exper
     impCategory = proposal.category;
     improvedCode = proposal.improvedCode;
     difficulty = impCategory === "performance" ? 3 : impCategory === "feature" ? 2 : 1;
+    totalTokens += proposal.tokens_used;
   } else {
     // Fallback: generate a plausible improvement name
     const fallbackNames = [
@@ -406,6 +414,7 @@ async function runAutoCycle(): Promise<{ success: boolean; result: string; exper
     const llmEval = await evaluateLLMImprovement(targetKey, currentCode, improvedCode, impDescription);
 
     if (llmEval) {
+      totalTokens += llmEval.tokens_used;
       const improved = llmEval.score > 50;
       const newScore = experimentState.best_score + (llmEval.score - 50) * 0.1;
       const clampedScore = Math.min(100, Math.max(0, newScore));
@@ -481,7 +490,7 @@ async function runAutoCycle(): Promise<{ success: boolean; result: string; exper
   heartbeat.status = "idle";
   heartbeat.current_experiment = null;
 
-  return { success: true, result: evalResult.description, experiment, improvement: imp };
+  return { success: true, result: evalResult.description, experiment, improvement: imp, tokens_used: totalTokens };
 }
 
 // ============================================================================

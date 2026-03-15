@@ -46,11 +46,14 @@ const PRIORITY_COLORS: Record<string, { bg: string; text: string }> = {
 
 export default function Tasks() {
   const [data, setData] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [newAssignee, setNewAssignee] = useState("");
   const [newPriority, setNewPriority] = useState("medium");
   const [newProject, setNewProject] = useState("");
+  const [newDueDate, setNewDueDate] = useState("");
+  const [newDescription, setNewDescription] = useState("");
 
   useEffect(() => {
     fetchData();
@@ -63,7 +66,8 @@ export default function Tasks() {
       const res = await fetch("/api/data");
       const json = await res.json();
       setData(json);
-    } catch {}
+      setError(null);
+    } catch { setError("Failed to load data"); }
   }
 
   async function moveTask(taskId: string, newStatus: string) {
@@ -77,18 +81,32 @@ export default function Tasks() {
     } catch {}
   }
 
+  async function deleteTask(taskId: string) {
+    if (!window.confirm("Delete this task?")) return;
+    try {
+      await fetch("/api/data", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete_task", task_id: taskId }),
+      });
+      fetchData();
+    } catch {}
+  }
+
   async function addTask() {
     if (!newTitle.trim()) return;
     try {
       await fetch("/api/data", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "add_task", title: newTitle, assignee: newAssignee, priority: newPriority, project: newProject, status: newAssignee ? "assigned" : "inbox" }),
+        body: JSON.stringify({ action: "add_task", title: newTitle, assignee: newAssignee, priority: newPriority, project: newProject, due_date: newDueDate || undefined, description: newDescription || undefined, status: newAssignee ? "assigned" : "inbox" }),
       });
       setNewTitle("");
       setNewAssignee("");
       setNewPriority("medium");
       setNewProject("");
+      setNewDueDate("");
+      setNewDescription("");
       setShowAdd(false);
       fetchData();
     } catch {}
@@ -96,8 +114,13 @@ export default function Tasks() {
 
   if (!data) {
     return (
-      <div style={{ minHeight: "100vh", background: "#09090b", color: "#a1a1aa", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, -apple-system, sans-serif" }}>
-        Loading...
+      <div style={{ minHeight: "100vh", background: "#09090b", color: "#a1a1aa", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, -apple-system, sans-serif", flexDirection: "column", gap: 12 }}>
+        {error ? (
+          <>
+            <span style={{ color: "#ef4444" }}>{error}</span>
+            <button onClick={() => { setError(null); fetchData(); }} style={{ background: "#27272a", color: "#f4f4f5", border: "none", borderRadius: 6, padding: "6px 16px", cursor: "pointer", fontSize: 13 }}>Retry</button>
+          </>
+        ) : "Loading..."}
       </div>
     );
   }
@@ -147,6 +170,14 @@ export default function Tasks() {
             <label style={{ fontSize: 11, color: "#71717a", display: "block", marginBottom: 4 }}>Project</label>
             <input value={newProject} onChange={(e) => setNewProject(e.target.value)} placeholder="Project name..." style={{ width: "100%", background: "#09090b", color: "#f4f4f5", border: "1px solid #3f3f46", borderRadius: 6, padding: "8px 12px", fontSize: 13, boxSizing: "border-box" }} />
           </div>
+          <div style={{ minWidth: 140 }}>
+            <label style={{ fontSize: 11, color: "#71717a", display: "block", marginBottom: 4 }}>Due Date</label>
+            <input type="date" value={newDueDate} onChange={(e) => setNewDueDate(e.target.value)} style={{ width: "100%", background: "#09090b", color: "#f4f4f5", border: "1px solid #3f3f46", borderRadius: 6, padding: "8px 12px", fontSize: 13, boxSizing: "border-box" }} />
+          </div>
+          <div style={{ flex: 2, minWidth: 200 }}>
+            <label style={{ fontSize: 11, color: "#71717a", display: "block", marginBottom: 4 }}>Description</label>
+            <input value={newDescription} onChange={(e) => setNewDescription(e.target.value)} placeholder="Task description..." style={{ width: "100%", background: "#09090b", color: "#f4f4f5", border: "1px solid #3f3f46", borderRadius: 6, padding: "8px 12px", fontSize: 13, boxSizing: "border-box" }} />
+          </div>
           <button onClick={addTask} style={{ background: "#4ade80", color: "#09090b", border: "none", borderRadius: 6, padding: "8px 16px", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>Add</button>
         </div>
       )}
@@ -171,8 +202,18 @@ export default function Tasks() {
                 {colTasks.map((task: any) => {
                   const pc = PRIORITY_COLORS[task.priority] || PRIORITY_COLORS.medium;
                   return (
-                    <div key={task.id} style={{ background: "#18181b", border: "1px solid #27272a", borderRadius: 8, padding: 12 }}>
-                      <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 6, lineHeight: 1.4 }}>{task.title}</div>
+                    <div key={task.id} style={{ background: "#18181b", border: "1px solid #27272a", borderRadius: 8, padding: 12, position: "relative" }}>
+                      <button onClick={() => deleteTask(task.id)} style={{ position: "absolute", top: 6, right: 6, background: "transparent", color: "#52525b", border: "none", cursor: "pointer", fontSize: 14, lineHeight: 1, padding: "2px 4px", borderRadius: 4 }} onMouseEnter={(e) => (e.currentTarget.style.color = "#ef4444")} onMouseLeave={(e) => (e.currentTarget.style.color = "#52525b")}>{"\u00d7"}</button>
+                      <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 2, lineHeight: 1.4, paddingRight: 16 }}>{task.title}</div>
+                      {task.due_date && (() => {
+                        const today = new Date();
+                        today.setHours(0, 0, 0, 0);
+                        const due = new Date(task.due_date + "T00:00:00");
+                        const diffDays = Math.ceil((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+                        const dueDateColor = diffDays < 0 ? "#ef4444" : diffDays <= 3 ? "#facc15" : "#4ade80";
+                        return <div style={{ fontSize: 11, color: dueDateColor, marginBottom: 2 }}>Due: {task.due_date}</div>;
+                      })()}
+                      {task.description && <div style={{ fontSize: 11, color: "#71717a", marginBottom: 4, lineHeight: 1.3 }}>{task.description.length > 60 ? task.description.slice(0, 60) + "..." : task.description}</div>}
                       <div style={{ display: "flex", gap: 6, marginBottom: 8, flexWrap: "wrap" }}>
                         <span style={{ fontSize: 10, fontWeight: 600, color: pc.text, background: pc.bg, padding: "2px 8px", borderRadius: 4 }}>{task.priority}</span>
                         {task.assignee && <span style={{ fontSize: 10, color: "#a1a1aa", background: "#27272a", padding: "2px 8px", borderRadius: 4 }}>{task.assignee}</span>}

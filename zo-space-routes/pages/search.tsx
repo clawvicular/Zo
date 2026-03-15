@@ -42,6 +42,7 @@ export default function GlobalSearch() {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<any[]>([]);
   const [searching, setSearching] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("all");
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -64,8 +65,10 @@ export default function GlobalSearch() {
         body: JSON.stringify({ action: "global_search", query: q }),
       });
       const json = await res.json();
+      setError(null);
       setResults(json.results || []);
     } catch {
+      setError("Failed to load data");
       setResults([]);
     }
     setSearching(false);
@@ -151,8 +154,16 @@ export default function GlobalSearch() {
           </div>
         )}
 
+        {/* Error */}
+        {error && (
+          <div style={{ minHeight: 48, background: "#18181b", color: "#a1a1aa", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "system-ui, -apple-system, sans-serif", flexDirection: "column", gap: 12, borderRadius: 10, padding: 16, marginBottom: 16 }}>
+            <span style={{ color: "#ef4444" }}>{error}</span>
+            <button onClick={() => { setError(null); doSearch(query); }} style={{ background: "#27272a", color: "#f4f4f5", border: "none", borderRadius: 6, padding: "6px 16px", cursor: "pointer", fontSize: 13 }}>Retry</button>
+          </div>
+        )}
+
         {/* Results */}
-        {query && !searching && results.length === 0 && (
+        {query && !searching && !error && results.length === 0 && (
           <div style={{ textAlign: "center", color: "#52525b", padding: 40, fontSize: 14 }}>
             No results found for "{query}"
           </div>

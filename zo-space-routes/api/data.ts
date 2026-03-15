@@ -25,10 +25,12 @@ type Agent = {
 type Task = {
   id: string;
   title: string;
+  description?: string;
   status: "inbox" | "assigned" | "in_progress" | "review" | "done";
   assignee: string;
   priority: "low" | "medium" | "high" | "urgent";
   project: string;
+  due_date?: string;
   created: string;
   updated: string;
 };
@@ -186,11 +188,11 @@ const agents: Agent[] = [
 ];
 
 const tasks: Task[] = [
-  { id: "t1", title: "Implement knowledge base ingestion pipeline", status: "in_progress", assignee: "BuildBot", priority: "high", project: "Knowledge Base Construction", created: "2026-03-13", updated: "2026-03-15" },
+  { id: "t1", title: "Implement knowledge base ingestion pipeline", description: "Build the ingestion pipeline for processing and indexing documents into the knowledge base", status: "in_progress", assignee: "BuildBot", priority: "high", project: "Knowledge Base Construction", due_date: "2026-03-18", created: "2026-03-13", updated: "2026-03-15" },
   { id: "t2", title: "Research vector DB options for memory storage", status: "done", assignee: "ResearchBot", priority: "high", project: "Knowledge Base Construction", created: "2026-03-12", updated: "2026-03-14" },
-  { id: "t3", title: "Design agent communication protocol", status: "in_progress", assignee: "BuildBot", priority: "urgent", project: "Agent Army Expansion", created: "2026-03-14", updated: "2026-03-15" },
-  { id: "t4", title: "Write API integration guide", status: "assigned", assignee: "DocBot", priority: "medium", project: "Knowledge Base Construction", created: "2026-03-13", updated: "2026-03-13" },
-  { id: "t5", title: "Consolidate March memory logs", status: "in_progress", assignee: "MemoryBot", priority: "medium", project: "Knowledge Base Construction", created: "2026-03-14", updated: "2026-03-15" },
+  { id: "t3", title: "Design agent communication protocol", description: "Define the inter-agent messaging format, routing, and error handling", status: "in_progress", assignee: "BuildBot", priority: "urgent", project: "Agent Army Expansion", due_date: "2026-03-17", created: "2026-03-14", updated: "2026-03-15" },
+  { id: "t4", title: "Write API integration guide", status: "assigned", assignee: "DocBot", priority: "medium", project: "Knowledge Base Construction", due_date: "2026-03-20", created: "2026-03-13", updated: "2026-03-13" },
+  { id: "t5", title: "Consolidate March memory logs", status: "in_progress", assignee: "MemoryBot", priority: "medium", project: "Knowledge Base Construction", due_date: "2026-03-19", created: "2026-03-14", updated: "2026-03-15" },
   { id: "t6", title: "Set up agent monitoring dashboard", status: "done", assignee: "BuildBot", priority: "high", project: "Mission Control Dashboard", created: "2026-03-12", updated: "2026-03-13" },
   { id: "t7", title: "Research multi-agent orchestration frameworks", status: "done", assignee: "ResearchBot", priority: "high", project: "Agent Army Expansion", created: "2026-03-13", updated: "2026-03-14" },
   { id: "t8", title: "Implement auto-scaling for sub-agents", status: "assigned", assignee: "BuildBot", priority: "high", project: "Agent Army Expansion", created: "2026-03-14", updated: "2026-03-14" },
@@ -393,6 +395,8 @@ export default async function handler(c: Context) {
             if (!VALID_PRIORITIES.includes(body.priority)) return c.json({ ok: false, error: `Invalid priority. Must be one of: ${VALID_PRIORITIES.join(", ")}` }, 400);
             task.priority = body.priority;
           }
+          if (body.due_date !== undefined) task.due_date = body.due_date || undefined;
+          if (body.description !== undefined) task.description = body.description || undefined;
           task.updated = new Date().toISOString().split("T")[0];
           return c.json({ ok: true, task });
         }
@@ -407,10 +411,12 @@ export default async function handler(c: Context) {
         const task: Task = {
           id,
           title: body.title || "New task",
+          description: body.description || undefined,
           status: body.status || "inbox",
           assignee: body.assignee || "",
           priority: body.priority || "medium",
           project: body.project || "",
+          due_date: body.due_date || undefined,
           created: new Date().toISOString().split("T")[0],
           updated: new Date().toISOString().split("T")[0],
         };
@@ -431,6 +437,37 @@ export default async function handler(c: Context) {
         memories.unshift(memory);
         if (memories.length > 500) memories.pop();
         return c.json({ ok: true, memory });
+      }
+
+      if (action === "delete_task") {
+        if (!body.task_id) return c.json({ ok: false, error: "task_id is required" }, 400);
+        const idx = tasks.findIndex((t) => t.id === body.task_id);
+        if (idx === -1) return c.json({ ok: false, error: "Task not found" }, 404);
+        const [removed] = tasks.splice(idx, 1);
+        return c.json({ ok: true, deleted: removed });
+      }
+
+      if (action === "delete_memory") {
+        if (!body.memory_id) return c.json({ ok: false, error: "memory_id is required" }, 400);
+        const idx = memories.findIndex((m) => m.id === body.memory_id);
+        if (idx === -1) return c.json({ ok: false, error: "Memory not found" }, 404);
+        const [removed] = memories.splice(idx, 1);
+        return c.json({ ok: true, deleted: removed });
+      }
+
+      if (action === "update_agent") {
+        if (!body.agent_id) return c.json({ ok: false, error: "agent_id is required" }, 400);
+        const agent = agents.find((a) => a.id === body.agent_id);
+        if (!agent) return c.json({ ok: false, error: "Agent not found" }, 404);
+        const VALID_AGENT_STATUSES = ["active", "paused", "error"];
+        if (body.status !== undefined) {
+          if (!VALID_AGENT_STATUSES.includes(body.status)) return c.json({ ok: false, error: `Invalid status. Must be one of: ${VALID_AGENT_STATUSES.join(", ")}` }, 400);
+          agent.status = body.status;
+        }
+        if (body.schedule !== undefined) agent.schedule = body.schedule;
+        if (body.model !== undefined) agent.model = body.model;
+        agent.last_active = "just now";
+        return c.json({ ok: true, agent });
       }
 
       if (action === "get_full_status") {

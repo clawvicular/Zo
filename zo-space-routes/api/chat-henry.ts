@@ -24,12 +24,51 @@ type ActionResult = {
 let conversationHistory: ChatMessage[] = [];
 let isChatProcessing = false;
 let isHeartbeatProcessing = false;
+let historyLoaded = false;
 
 // Heartbeat state
 let heartbeatActive = false;
 let heartbeatInterval: any = null;
 let heartbeatLog: { timestamp: string; summary: string; actions: number }[] = [];
 const HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+
+// Persistence paths
+const PERSIST_DIR = "/home/workspace/henry";
+const HISTORY_PATH = `${PERSIST_DIR}/conversation.json`;
+const HEARTBEAT_LOG_PATH = `${PERSIST_DIR}/heartbeat.json`;
+
+async function ensurePersistDir(): Promise<void> {
+  try { await Bun.write(`${PERSIST_DIR}/.keep`, ""); } catch { /* dir may exist */ }
+}
+
+async function loadHistory(): Promise<void> {
+  if (historyLoaded) return;
+  historyLoaded = true;
+  try {
+    const text = await Bun.file(HISTORY_PATH).text();
+    const parsed = JSON.parse(text);
+    if (Array.isArray(parsed)) conversationHistory = parsed.slice(-100);
+  } catch { /* no saved history or parse error — start fresh */ }
+  try {
+    const text = await Bun.file(HEARTBEAT_LOG_PATH).text();
+    const parsed = JSON.parse(text);
+    if (Array.isArray(parsed)) heartbeatLog = parsed.slice(-100);
+  } catch { /* no saved heartbeat log */ }
+}
+
+async function saveHistory(): Promise<void> {
+  try {
+    await ensurePersistDir();
+    await Bun.write(HISTORY_PATH, JSON.stringify(conversationHistory.slice(-100)));
+  } catch { /* best effort */ }
+}
+
+async function saveHeartbeatLog(): Promise<void> {
+  try {
+    await ensurePersistDir();
+    await Bun.write(HEARTBEAT_LOG_PATH, JSON.stringify(heartbeatLog.slice(-100)));
+  } catch { /* best effort */ }
+}
 
 // Soul.md content — loaded lazily on first use
 let soulContent = "";
@@ -57,17 +96,19 @@ function getBaseUrl(): string {
 // LLM call — same pattern as meta-improve.ts
 // ============================================================================
 
-async function callLLM(systemPrompt: string, messages: { role: string; content: string }[]): Promise<string | null> {
+type LLMResult = { content: string | null; tokens_used: number };
+
+async function callLLM(systemPrompt: string, messages: { role: string; content: string }[]): Promise<LLMResult> {
   const apiKey = (globalThis as any).process?.env?.ZO_API_KEY
     || (globalThis as any).process?.env?.MINIMAX_API_KEY
     || (globalThis as any).process?.env?.ZO_CLIENT_IDENTITY_TOKEN;
 
   const baseUrl = (globalThis as any).process?.env?.LLM_BASE_URL || "https://api.minimax.io/v1";
 
-  if (!apiKey) return null;
+  if (!apiKey) return { content: null, tokens_used: 0 };
 
   // Reject JWTs and tokens with control chars
-  if (/[\r\n\x00-\x1f]/.test(apiKey) || apiKey.startsWith("eyJ")) return null;
+  if (/[\r\n\x00-\x1f]/.test(apiKey) || apiKey.startsWith("eyJ")) return { content: null, tokens_used: 0 };
 
   try {
     const res = await fetch(`${baseUrl}/chat/completions`, {
@@ -87,13 +128,15 @@ async function callLLM(systemPrompt: string, messages: { role: string; content: 
       }),
     });
 
-    if (!res.ok) return null;
+    if (!res.ok) return { content: null, tokens_used: 0 };
 
     const text = await res.text();
     const data = JSON.parse(text);
-    return data.choices?.[0]?.message?.content || null;
+    const content = data.choices?.[0]?.message?.content || null;
+    const tokens_used = data.usage?.total_tokens || 0;
+    return { content, tokens_used };
   } catch {
-    return null;
+    return { content: null, tokens_used: 0 };
   }
 }
 
@@ -270,7 +313,7 @@ async function executeTool(tool: string, params: Record<string, any>): Promise<{
           const truncated = text.slice(0, 8000);
 
           if (params.prompt) {
-            const summary = await callLLM(
+            const { content: summary } = await callLLM(
               "You are a web content analyzer. Extract the requested information concisely.",
               [{ role: "user", content: `URL: ${url}\nContent:\n${truncated}\n\nExtract: ${params.prompt}` }]
             );
@@ -282,6 +325,43 @@ async function executeTool(tool: string, params: Record<string, any>): Promise<{
           clearTimeout(timeout);
           return { result: `Error fetching ${url}: ${e.message}`, success: false };
         }
+      }
+
+      case "delete_task": {
+        const res = await fetch(`${base}/api/data`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "delete_task", task_id: params.task_id }),
+        });
+        const text = await res.text();
+        const data = JSON.parse(text);
+        return { result: JSON.stringify(data), success: data.ok };
+      }
+
+      case "delete_memory": {
+        const res = await fetch(`${base}/api/data`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "delete_memory", memory_id: params.memory_id }),
+        });
+        const text = await res.text();
+        const data = JSON.parse(text);
+        return { result: JSON.stringify(data), success: data.ok };
+      }
+
+      case "update_agent": {
+        const updateBody: Record<string, any> = { action: "update_agent", agent_id: params.agent_id };
+        if (params.status !== undefined) updateBody.status = params.status;
+        if (params.schedule !== undefined) updateBody.schedule = params.schedule;
+        if (params.model !== undefined) updateBody.model = params.model;
+        const res = await fetch(`${base}/api/data`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(updateBody),
+        });
+        const text = await res.text();
+        const data = JSON.parse(text);
+        return { result: JSON.stringify(data), success: data.ok };
       }
 
       case "run_shell": {
@@ -388,11 +468,11 @@ Params: {} (none required)
 
 ### Tool: create_task
 Create a real task in Mission Control.
-Params: { "title": string, "assignee"?: string, "priority"?: "low"|"medium"|"high"|"urgent", "project"?: string }
+Params: { "title": string, "assignee"?: string, "priority"?: "low"|"medium"|"high"|"urgent", "project"?: string, "due_date"?: string, "description"?: string }
 
 ### Tool: update_task
 Update an existing task.
-Params: { "task_id": string, "status"?: "inbox"|"assigned"|"in_progress"|"review"|"done", "assignee"?: string, "priority"?: string }
+Params: { "task_id": string, "status"?: "inbox"|"assigned"|"in_progress"|"review"|"done", "assignee"?: string, "priority"?: string, "due_date"?: string, "description"?: string }
 
 ### Tool: search
 Search all Mission Control data (agents, tasks, memories, projects, documents, activities).
@@ -421,6 +501,18 @@ Params: { "url": string, "prompt"?: string }
 ### Tool: run_shell
 Execute a read-only shell command (ls, date, uptime, whoami, pwd, echo, wc, df, du only).
 Params: { "command": string }
+
+### Tool: delete_task
+Delete a task from Mission Control.
+Params: { "task_id": string }
+
+### Tool: delete_memory
+Delete a memory entry.
+Params: { "memory_id": string }
+
+### Tool: update_agent
+Update an agent's configuration.
+Params: { "agent_id": string, "status"?: "active"|"paused"|"error", "schedule"?: string, "model"?: string }
 
 ## Rules
 1. ALWAYS use tools when the user asks you to DO something — create tasks, search, check status, etc.
@@ -518,7 +610,7 @@ IMPORTANT: Always take at least one action (even if it's just log_activity with 
 Respond with JSON: { "thinking": "...", "actions": [...], "response": "..." }`;
 
     // 3. Call LLM
-    const rawResponse = await callLLM(systemPrompt, [{ role: "user", content: heartbeatPrompt }]);
+    const { content: rawResponse, tokens_used: heartbeatTokens } = await callLLM(systemPrompt, [{ role: "user", content: heartbeatPrompt }]);
 
     if (!rawResponse) {
       heartbeatLog.push({
@@ -556,7 +648,7 @@ Respond with JSON: { "thinking": "...", "actions": [...], "response": "..." }`;
         agent: "Henry",
         activity_action: "heartbeat",
         detail: `[Autonomous] ${summary.slice(0, 150)} (${actionResults.length} actions)`,
-        tokens_used: 0,
+        tokens_used: heartbeatTokens,
       }),
     }).catch(() => {});
 
@@ -570,6 +662,7 @@ Respond with JSON: { "thinking": "...", "actions": [...], "response": "..." }`;
     if (heartbeatLog.length > 100) {
       heartbeatLog = heartbeatLog.slice(-100);
     }
+    await saveHeartbeatLog();
   } catch (e: any) {
     heartbeatLog.push({
       timestamp: new Date().toISOString(),
@@ -609,6 +702,9 @@ startHeartbeat();
 export default async function handler(c: Context) {
   const method = c.req.method;
 
+  // Ensure history is loaded from disk on first request
+  await loadHistory();
+
   // GET — return conversation history + heartbeat state
   if (method === "GET") {
     return c.json({
@@ -636,6 +732,7 @@ export default async function handler(c: Context) {
     // Clear history
     if (body.action === "clear") {
       conversationHistory = [];
+      await saveHistory();
       return c.json({ ok: true });
     }
 
@@ -697,7 +794,9 @@ export default async function handler(c: Context) {
       }));
 
       // 5. First LLM call: think + decide actions
-      const rawResponse = await callLLM(systemPrompt, recentMessages);
+      let totalTokens = 0;
+      const { content: rawResponse, tokens_used: firstCallTokens } = await callLLM(systemPrompt, recentMessages);
+      totalTokens += firstCallTokens;
 
       if (!rawResponse) {
         const fallbackMsg = "I'm currently unable to connect to my LLM brain (Minimax 2.5). Please check that ZO_API_KEY or MINIMAX_API_KEY is set. I'll be here when the connection is restored.";
@@ -736,7 +835,7 @@ export default async function handler(c: Context) {
           .map((ar) => `Tool: ${ar.tool}\nResult (${ar.success ? "success" : "error"}): ${ar.result.slice(0, 1500)}`)
           .join("\n\n");
 
-        const summaryResponse = await callLLM(
+        const { content: summaryContent, tokens_used: summaryTokens } = await callLLM(
           "You are Henry, Chief Orchestrator. Summarize the results of your tool calls in a clear, helpful way for the user. Be concise. Do NOT return JSON — respond in plain text.",
           [
             { role: "user", content: userMessage },
@@ -744,9 +843,10 @@ export default async function handler(c: Context) {
             { role: "user", content: "Summarize what you found/did in a helpful response." },
           ]
         );
+        totalTokens += summaryTokens;
 
-        if (summaryResponse) {
-          finalResponse = summaryResponse;
+        if (summaryContent) {
+          finalResponse = summaryContent;
         }
       }
 
@@ -758,10 +858,11 @@ export default async function handler(c: Context) {
         timestamp: new Date().toISOString(),
       });
 
-      // 10. Trim history to last 50 messages
+      // 10. Trim history to last 50 messages and persist
       if (conversationHistory.length > 50) {
         conversationHistory = conversationHistory.slice(-50);
       }
+      await saveHistory();
 
       // 11. Log activity (fire and forget)
       fetch(`${base}/api/data`, {
@@ -772,7 +873,7 @@ export default async function handler(c: Context) {
           agent: "Henry",
           activity_action: "chat_response",
           detail: `Responded to: "${userMessage.slice(0, 80)}${userMessage.length > 80 ? "..." : ""}" (${actionResults.length} tool calls)`,
-          tokens_used: 0,
+          tokens_used: totalTokens,
         }),
       }).catch(() => {});
 
@@ -780,6 +881,7 @@ export default async function handler(c: Context) {
         message: finalResponse,
         thinking: parsed.thinking,
         actions: actionResults,
+        tokens_used: totalTokens,
         timestamp: new Date().toISOString(),
       });
     } catch (e: any) {
