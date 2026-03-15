@@ -85,7 +85,7 @@ export default function ActivityFeed() {
     return true;
   });
 
-  const todayCount = activities.filter((a: any) => a.timestamp?.startsWith("2026-03-15")).length;
+  const todayCount = activities.filter((a: any) => a.timestamp?.startsWith(new Date().toISOString().split("T")[0])).length;
   const totalTokens = activities.reduce((s: number, a: any) => s + (a.tokens_used || 0), 0);
   const agentCounts: Record<string, number> = {};
   activities.forEach((a: any) => { agentCounts[a.agent] = (agentCounts[a.agent] || 0) + 1; });
