@@ -182,6 +182,14 @@ async function callLLM(systemPrompt: string, userPrompt: string): Promise<string
     return null;
   }
 
+  // Validate API key format — reject JWTs and tokens with control chars
+  // Bun's fetch() throws "The string did not match the expected pattern" for bad header values
+  if (/[\r\n\x00-\x1f]/.test(apiKey) || apiKey.startsWith("eyJ")) {
+    heartbeat.llm_connected = false;
+    heartbeat.error = "Invalid API key format — set ZO_API_KEY or MINIMAX_API_KEY with a valid Minimax key";
+    return null;
+  }
+
   try {
     const res = await fetch(`${baseUrl}/chat/completions`, {
       method: "POST",

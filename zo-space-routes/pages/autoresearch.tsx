@@ -23,9 +23,19 @@ export default function AutoResearch() {
 
   // Fetch both APIs in parallel — one failing doesn't break the other
   const fetchState = useCallback(async () => {
+    const safeFetch = async (url: string) => {
+      try {
+        const r = await fetch(url);
+        if (!r.ok) return null;
+        const text = await r.text();
+        return JSON.parse(text);
+      } catch {
+        return null;
+      }
+    };
     const [metaRes, llmRes] = await Promise.allSettled([
-      fetch("/api/meta-improve").then(r => r.ok ? r.json() : null),
-      fetch("/api/autoresearch").then(r => r.ok ? r.json() : null),
+      safeFetch("/api/meta-improve"),
+      safeFetch("/api/autoresearch"),
     ]);
     if (metaRes.status === "fulfilled" && metaRes.value) setMetaState(metaRes.value);
     if (llmRes.status === "fulfilled" && llmRes.value) setLlmState(llmRes.value);
@@ -45,7 +55,20 @@ export default function AutoResearch() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ action: "auto" }),
       });
-      const data = await res.json();
+
+      // Safe JSON parsing — Bun throws "The string did not match the expected pattern"
+      // if res.json() is called on a non-JSON response body
+      let data: any;
+      try {
+        const text = await res.text();
+        data = JSON.parse(text);
+      } catch {
+        log("Error: Server returned non-JSON response (HTTP " + res.status + ")");
+        await fetchState();
+        setCycles((c) => c + 1);
+        return;
+      }
+
       if (data.success) {
         const icon = data.experiment?.improved ? "+" : "-";
         log(`[${icon}] ${data.improvement?.name} -> ${data.improvement?.target}`);
@@ -61,12 +84,13 @@ export default function AutoResearch() {
       } else {
         log("Cycle failed: " + (data.error || "unknown"));
       }
-      await fetchState();
-      setCycles((c) => c + 1);
-      log("Done. Next cycle in 5 min.");
     } catch (e: any) {
       log("Error: " + (e?.message || "network error"));
     }
+    // Always refresh state and increment cycle counter
+    await fetchState();
+    setCycles((c) => c + 1);
+    log("Done. Next cycle in 5 min.");
   }, [log, fetchState]);
 
   const startLoop = useCallback(
