@@ -87,7 +87,8 @@ export default function Projects() {
           const projectTasks = tasks.filter((t: any) => t.project === p.name);
           const isExpanded = expanded === p.id;
           const deadline = new Date(p.deadline);
-          const daysLeft = Math.ceil((deadline.getTime() - new Date("2026-03-15").getTime()) / (1000 * 60 * 60 * 24));
+          const daysLeft = Math.ceil((deadline.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+          const isComplete = p.status === "complete" || p.progress === 100;
           const projectDocs = documents.filter((d: any) => p.documents.includes(d.name));
 
           // Agent involvement
@@ -106,8 +107,8 @@ export default function Projects() {
                     <span style={{ fontSize: 18, fontWeight: 700 }}>{p.name}</span>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                    <span style={{ fontSize: 13, color: daysLeft <= 0 ? "#4ade80" : daysLeft <= 5 ? "#fbbf24" : "#a1a1aa" }}>
-                      {daysLeft <= 0 ? "Complete!" : `${daysLeft} days left`}
+                    <span style={{ fontSize: 13, color: isComplete ? "#4ade80" : daysLeft <= 0 ? "#ef4444" : daysLeft <= 5 ? "#fbbf24" : "#a1a1aa" }}>
+                      {isComplete ? "Complete!" : daysLeft <= 0 ? "Overdue!" : `${daysLeft} days left`}
                     </span>
                     <span style={{ fontSize: 20, fontWeight: 700, color: p.status === "complete" ? "#4ade80" : "#3b82f6" }}>{p.progress}%</span>
                   </div>

@@ -130,7 +130,7 @@ export default function Dashboard() {
           { label: "Tasks In Progress", value: stats.tasks_in_progress, icon: "\u{26A1}" },
           { label: "Total Memories", value: stats.total_memories, icon: "\u{1F9E0}" },
           { label: "Active Projects", value: stats.active_projects, icon: "\u{1F4CA}" },
-          { label: "Activities Today", value: data.activities?.filter((a: any) => a.timestamp?.startsWith("2026-03-15")).length || 0, icon: "\u{1F4C8}" },
+          { label: "Activities Today", value: data.activities?.filter((a: any) => a.timestamp?.startsWith(new Date().toISOString().split("T")[0])).length || 0, icon: "\u{1F4C8}" },
           { label: "Tokens Today", value: (stats.tokens_today || 0).toLocaleString(), icon: "\u{1F4B0}" },
         ].map((s) => (
           <div key={s.label} style={{ background: "#18181b", border: "1px solid #27272a", borderRadius: 10, padding: 16 }}>

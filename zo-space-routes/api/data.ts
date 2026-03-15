@@ -252,7 +252,7 @@ const projects: Project[] = [
 const documents: Document[] = [
   { id: "d1", name: "Mission Control Spec", agent: "DocBot", created: "2026-03-12", tags: ["spec", "architecture"] },
   { id: "d2", name: "AI Frameworks Comparison", agent: "ResearchBot", created: "2026-03-11", tags: ["research", "comparison"] },
-  { id: "d3", name: "Agent Army Roadmap", agent: "PlannerBot", created: "2026-03-10", tags: ["roadmap", "planning"] },
+  { id: "d3", name: "Agent Army Roadmap", agent: "Henry", created: "2026-03-10", tags: ["roadmap", "planning"] },
   { id: "d4", name: "API Integration Guide", agent: "BuildBot", created: "2026-03-09", tags: ["api", "guide"] },
   { id: "d5", name: "Memory System Design", agent: "MemoryBot", created: "2026-03-08", tags: ["memory", "design"] },
   { id: "d6", name: "Memory Consolidation Summary", agent: "MemoryBot", created: "2026-03-13", tags: ["memory", "consolidation"] },
@@ -279,6 +279,7 @@ const activities: Activity[] = [
 ];
 
 let activityCounter = activities.length;
+let taskCounter = tasks.length;
 
 // ============================================================================
 // Schedule data (cron jobs / recurring tasks)
@@ -299,9 +300,20 @@ const schedule = [
 // ============================================================================
 
 function globalSearch(query: string) {
+  if (!query || query.trim() === "") return [];
   const q = query.toLowerCase();
   const results: { type: string; id: string; title: string; content: string; agent: string; timestamp: string }[] = [];
 
+  for (const agent of agents) {
+    if (agent.name.toLowerCase().includes(q) || agent.role.toLowerCase().includes(q) || agent.specialty.toLowerCase().includes(q)) {
+      results.push({ type: "agent", id: agent.id, title: agent.name, content: `${agent.role} — ${agent.specialty}`, agent: agent.name, timestamp: agent.created });
+    }
+  }
+  for (const p of projects) {
+    if (p.name.toLowerCase().includes(q) || p.status.toLowerCase().includes(q)) {
+      results.push({ type: "project", id: p.id, title: p.name, content: `${p.status} — ${p.progress}% complete`, agent: "", timestamp: p.deadline });
+    }
+  }
   for (const m of memories) {
     if (m.content.toLowerCase().includes(q) || m.tags.some((t) => t.toLowerCase().includes(q))) {
       results.push({ type: "memory", id: m.id, title: `${m.type} by ${m.agent}`, content: m.content, agent: m.agent, timestamp: m.timestamp });
@@ -340,7 +352,7 @@ export default async function handler(c: Context) {
       const action = body.action;
 
       if (action === "set_mission") {
-        missionStatement = body.mission || missionStatement;
+        missionStatement = (body.mission !== undefined && body.mission !== null) ? body.mission : missionStatement;
         return c.json({ ok: true, mission: missionStatement });
       }
 
@@ -365,11 +377,12 @@ export default async function handler(c: Context) {
       }
 
       if (action === "update_task") {
+        if (!body.task_id) return c.json({ ok: false, error: "task_id is required" }, 400);
         const task = tasks.find((t) => t.id === body.task_id);
         if (task) {
-          if (body.status) task.status = body.status;
-          if (body.assignee) task.assignee = body.assignee;
-          if (body.priority) task.priority = body.priority;
+          if (body.status !== undefined) task.status = body.status;
+          if (body.assignee !== undefined) task.assignee = body.assignee;
+          if (body.priority !== undefined) task.priority = body.priority;
           task.updated = new Date().toISOString().split("T")[0];
           return c.json({ ok: true, task });
         }
@@ -377,7 +390,8 @@ export default async function handler(c: Context) {
       }
 
       if (action === "add_task") {
-        const id = `t${tasks.length + 1}`;
+        taskCounter++;
+        const id = `t${taskCounter}`;
         const task: Task = {
           id,
           title: body.title || "New task",
@@ -417,7 +431,7 @@ export default async function handler(c: Context) {
       total_activities: activities.length,
       total_documents: documents.length,
       active_projects: projects.filter((p) => p.status === "active").length,
-      tokens_today: activities.filter((a) => a.timestamp.startsWith("2026-03-15")).reduce((s, a) => s + a.tokens_used, 0),
+      tokens_today: activities.filter((a) => a.timestamp.startsWith(new Date().toISOString().split("T")[0])).reduce((s, a) => s + a.tokens_used, 0),
     },
   });
 }

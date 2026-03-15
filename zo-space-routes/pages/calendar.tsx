@@ -61,7 +61,9 @@ export default function Calendar() {
   // Build calendar grid
   const firstDay = new Date(currentYear, currentMonth, 1).getDay();
   const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
-  const today = 15; // Mar 15, 2026
+  const now = new Date();
+  const todayDay = now.getDate();
+  const isCurrentMonthYear = now.getMonth() === currentMonth && now.getFullYear() === currentYear;
 
   // Collect events per day
   const deadlines: Record<number, string[]> = {};
@@ -119,7 +121,7 @@ export default function Calendar() {
             ))}
             {Array.from({ length: daysInMonth }).map((_, i) => {
               const day = i + 1;
-              const isToday = day === today && currentMonth === 2 && currentYear === 2026;
+              const isToday = isCurrentMonthYear && day === todayDay;
               const hasDeadline = deadlines[day];
               const actCount = activityDays[day] || 0;
 
@@ -173,14 +175,15 @@ export default function Calendar() {
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             {(data.projects || []).map((p: any) => {
               const deadline = new Date(p.deadline);
-              const daysLeft = Math.ceil((deadline.getTime() - new Date("2026-03-15").getTime()) / (1000 * 60 * 60 * 24));
+              const daysLeft = Math.ceil((deadline.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
+              const isComplete = p.status === "complete" || p.progress === 100;
               return (
                 <div key={p.id} style={{ background: "#18181b", border: "1px solid #27272a", borderRadius: 8, padding: 12 }}>
                   <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 4 }}>{p.name}</div>
                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "#71717a" }}>
                     <span>{p.deadline}</span>
-                    <span style={{ color: daysLeft <= 0 ? "#4ade80" : daysLeft <= 5 ? "#fbbf24" : "#a1a1aa" }}>
-                      {daysLeft <= 0 ? "Complete!" : `${daysLeft} days left`}
+                    <span style={{ color: isComplete ? "#4ade80" : daysLeft <= 0 ? "#ef4444" : daysLeft <= 5 ? "#fbbf24" : "#a1a1aa" }}>
+                      {isComplete ? "Complete!" : daysLeft <= 0 ? "Overdue!" : `${daysLeft} days left`}
                     </span>
                   </div>
                   <div style={{ background: "#27272a", borderRadius: 4, height: 4, overflow: "hidden", marginTop: 6 }}>

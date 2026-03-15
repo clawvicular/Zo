@@ -29,6 +29,8 @@ function Nav({ current }: { current: string }) {
 }
 
 const TYPE_STYLES: Record<string, { bg: string; text: string; icon: string }> = {
+  agent: { bg: "#2e1065", text: "#c084fc", icon: "\u{1F916}" },
+  project: { bg: "#052e16", text: "#4ade80", icon: "\u{1F4CA}" },
   memory: { bg: "#042f2e", text: "#2dd4bf", icon: "\u{1F9E0}" },
   task: { bg: "#1e3a5f", text: "#60a5fa", icon: "\u{2705}" },
   document: { bg: "#1e1b4b", text: "#a5b4fc", icon: "\u{1F4C4}" },
@@ -68,7 +70,7 @@ export default function GlobalSearch() {
     setSearching(false);
   }
 
-  const tabs = ["all", "memory", "task", "document", "activity"];
+  const tabs = ["all", "agent", "project", "memory", "task", "document", "activity"];
   const filtered = activeTab === "all" ? results : results.filter((r) => r.type === activeTab);
 
   function highlightMatch(text: string, q: string) {
