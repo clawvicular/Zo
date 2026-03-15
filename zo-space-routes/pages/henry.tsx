@@ -111,7 +111,7 @@ function ToolCallCard({ action }: { action: ActionResult }) {
           </pre>
           <div style={{ color: "#71717a", marginTop: 8, marginBottom: 4 }}>Result:</div>
           <pre style={{ margin: 0, color: "#d4d4d8", whiteSpace: "pre-wrap", wordBreak: "break-all", fontSize: 11, maxHeight: 200, overflow: "auto" }}>
-            {action.result.slice(0, 2000)}
+            {(action.result || "").slice(0, 2000)}
           </pre>
         </div>
       )}
@@ -127,13 +127,17 @@ export default function Henry() {
   const [heartbeat, setHeartbeat] = useState<any>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const sendingRef = useRef(false); // Synchronous guard against double-send
 
   // Load history + heartbeat state on mount, poll every 30s
   useEffect(() => {
     function loadState() {
+      // Skip polling while a message is in flight to avoid overwriting optimistic state
+      if (sendingRef.current) return;
       fetch("/api/chat-henry")
         .then((r) => r.json())
         .then((data) => {
+          if (sendingRef.current) return; // Re-check after async
           if (data.history?.length) setMessages(data.history);
           setStatus(data.status || "ready");
           if (data.heartbeat) setHeartbeat(data.heartbeat);
@@ -152,8 +156,9 @@ export default function Henry() {
 
   async function sendMessage(msg?: string) {
     const text = (msg || input).trim();
-    if (!text || loading) return;
+    if (!text || sendingRef.current) return; // Synchronous ref guard prevents double-send
 
+    sendingRef.current = true;
     setInput("");
     setLoading(true);
     setStatus("processing");
@@ -190,10 +195,11 @@ export default function Henry() {
     } catch (e: any) {
       setMessages((prev) => [
         ...prev,
-        { role: "assistant", content: `Connection error: ${e.message}`, timestamp: new Date().toISOString() },
+        { role: "assistant", content: `Connection error: ${e?.message || "unknown"}`, timestamp: new Date().toISOString() },
       ]);
     }
 
+    sendingRef.current = false;
     setLoading(false);
     setStatus("ready");
   }
@@ -206,6 +212,7 @@ export default function Henry() {
   }
 
   async function clearHistory() {
+    if (sendingRef.current) return;
     await fetch("/api/chat-henry", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -283,7 +290,7 @@ export default function Henry() {
 
         {messages.map((msg, i) => (
           <div
-            key={i}
+            key={`${msg.role}-${msg.timestamp}-${i}`}
             style={{
               display: "flex",
               justifyContent: msg.role === "user" ? "flex-end" : "flex-start",

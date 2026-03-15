@@ -22,7 +22,8 @@ type ActionResult = {
 
 // In-memory conversation state
 let conversationHistory: ChatMessage[] = [];
-let isProcessing = false;
+let isChatProcessing = false;
+let isHeartbeatProcessing = false;
 
 // Heartbeat state
 let heartbeatActive = false;
@@ -100,7 +101,7 @@ async function callLLM(systemPrompt: string, messages: { role: string; content: 
 // Tool Implementations
 // ============================================================================
 
-const SAFE_COMMANDS = ["ls", "cat", "head", "tail", "date", "uptime", "whoami", "pwd", "echo", "wc", "df", "du", "find"];
+const SAFE_COMMANDS = ["ls", "date", "uptime", "whoami", "pwd", "echo", "wc", "df", "du"];
 const BLOCKED_PATTERNS = ["|", ">", "<", ";", "&&", "||", "`", "$(", "rm", "sudo", "chmod", "chown", "kill", "mkfs", "dd", "mv", "cp"];
 
 async function executeTool(tool: string, params: Record<string, any>): Promise<{ result: string; success: boolean }> {
@@ -225,17 +226,20 @@ async function executeTool(tool: string, params: Record<string, any>): Promise<{
         const taskText = await taskRes.text();
         const taskData = JSON.parse(taskText);
 
-        await fetch(`${base}/api/data`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "add_activity",
-            agent: "Henry",
-            activity_action: "delegate",
-            detail: `Delegated "${params.task || params.title}" to ${params.agent || params.assignee}`,
-            tokens_used: 0,
-          }),
-        });
+        // Log activity (don't let failure mask the successful task creation)
+        try {
+          await fetch(`${base}/api/data`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              action: "add_activity",
+              agent: "Henry",
+              activity_action: "delegate",
+              detail: `Delegated "${params.task || params.title}" to ${params.agent || params.assignee}`,
+              tokens_used: 0,
+            }),
+          });
+        } catch { /* activity logging is best-effort */ }
 
         return { result: JSON.stringify(taskData), success: taskData.ok };
       }
@@ -261,8 +265,8 @@ async function executeTool(tool: string, params: Record<string, any>): Promise<{
             signal: controller.signal,
             headers: { "User-Agent": "HenryBot/1.0" },
           });
-          clearTimeout(timeout);
           const text = await res.text();
+          clearTimeout(timeout);
           const truncated = text.slice(0, 8000);
 
           if (params.prompt) {
@@ -298,20 +302,24 @@ async function executeTool(tool: string, params: Record<string, any>): Promise<{
 
         try {
           const proc = Bun.spawn(parts, { stdout: "pipe", stderr: "pipe" });
-          const stdout = await new Response(proc.stdout).text();
-          const stderr = await new Response(proc.stderr).text();
 
+          // Timeout wraps EVERYTHING — stream reads + exit
           let killTimer: any;
-          const exitCode = await Promise.race([
-            proc.exited,
-            new Promise<number>((_, reject) => {
+          const result = await Promise.race([
+            (async () => {
+              const stdout = await new Response(proc.stdout).text();
+              const stderr = await new Response(proc.stderr).text();
+              const exitCode = await proc.exited;
+              return { stdout, stderr, exitCode };
+            })(),
+            new Promise<never>((_, reject) => {
               killTimer = setTimeout(() => { proc.kill(); reject(new Error("Timeout after 5s")); }, 5000);
             }),
           ]);
           clearTimeout(killTimer);
 
-          const output = (stdout + (stderr ? "\nSTDERR: " + stderr : "")).slice(0, 2000);
-          return { result: output || "(no output)", success: exitCode === 0 };
+          const output = (result.stdout + (result.stderr ? "\nSTDERR: " + result.stderr : "")).slice(0, 2000);
+          return { result: output || "(no output)", success: result.exitCode === 0 };
         } catch (e: any) {
           return { result: `Error: ${e?.message || "unknown"}`, success: false };
         }
@@ -411,7 +419,7 @@ Fetch content from a URL.
 Params: { "url": string, "prompt"?: string }
 
 ### Tool: run_shell
-Execute a read-only shell command (ls, cat, head, tail, date, uptime, whoami, pwd, echo, wc, df, du, find only).
+Execute a read-only shell command (ls, date, uptime, whoami, pwd, echo, wc, df, du only).
 Params: { "command": string }
 
 ## Rules
@@ -475,8 +483,8 @@ function parseHenryResponse(raw: string): { thinking?: string; actions: { tool: 
 // ============================================================================
 
 async function runHeartbeat(): Promise<void> {
-  if (isProcessing) return; // Don't overlap with chat
-  isProcessing = true;
+  if (isHeartbeatProcessing || isChatProcessing) return; // Don't overlap
+  isHeartbeatProcessing = true;
 
   try {
     // 1. Fetch current system state
@@ -569,7 +577,7 @@ Respond with JSON: { "thinking": "...", "actions": [...], "response": "..." }`;
       actions: 0,
     });
   } finally {
-    isProcessing = false;
+    isHeartbeatProcessing = false;
   }
 }
 
@@ -605,7 +613,7 @@ export default async function handler(c: Context) {
   if (method === "GET") {
     return c.json({
       history: conversationHistory,
-      status: isProcessing ? "processing" : "ready",
+      status: (isChatProcessing || isHeartbeatProcessing) ? "processing" : "ready",
       messageCount: conversationHistory.length,
       heartbeat: {
         active: heartbeatActive,
@@ -651,12 +659,12 @@ export default async function handler(c: Context) {
       return c.json({ error: "message is required" }, 400);
     }
 
-    // Mutex — prevent concurrent processing
-    if (isProcessing) {
+    // Mutex — prevent concurrent chat processing (heartbeat has its own lock)
+    if (isChatProcessing) {
       return c.json({ error: "Henry is thinking... please wait.", status: "processing" }, 429);
     }
 
-    isProcessing = true;
+    isChatProcessing = true;
 
     try {
       // 1. Fetch current system state
@@ -775,9 +783,15 @@ export default async function handler(c: Context) {
         timestamp: new Date().toISOString(),
       });
     } catch (e: any) {
+      // Push error response so history doesn't have a dangling user message
+      conversationHistory.push({
+        role: "assistant",
+        content: `Error processing request: ${e?.message || "unknown"}`,
+        timestamp: new Date().toISOString(),
+      });
       return c.json({ error: `Henry error: ${e?.message || "unknown"}` }, 500);
     } finally {
-      isProcessing = false;
+      isChatProcessing = false;
     }
   }
 

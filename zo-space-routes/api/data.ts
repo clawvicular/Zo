@@ -280,6 +280,10 @@ const activities: Activity[] = [
 
 let activityCounter = activities.length;
 let taskCounter = tasks.length;
+let memoryCounter = memories.length;
+
+const VALID_TASK_STATUSES = ["inbox", "assigned", "in_progress", "review", "done"] as const;
+const VALID_PRIORITIES = ["low", "medium", "high", "urgent"] as const;
 
 // ============================================================================
 // Schedule data (cron jobs / recurring tasks)
@@ -380,9 +384,15 @@ export default async function handler(c: Context) {
         if (!body.task_id) return c.json({ ok: false, error: "task_id is required" }, 400);
         const task = tasks.find((t) => t.id === body.task_id);
         if (task) {
-          if (body.status !== undefined) task.status = body.status;
+          if (body.status !== undefined) {
+            if (!VALID_TASK_STATUSES.includes(body.status)) return c.json({ ok: false, error: `Invalid status. Must be one of: ${VALID_TASK_STATUSES.join(", ")}` }, 400);
+            task.status = body.status;
+          }
           if (body.assignee !== undefined) task.assignee = body.assignee;
-          if (body.priority !== undefined) task.priority = body.priority;
+          if (body.priority !== undefined) {
+            if (!VALID_PRIORITIES.includes(body.priority)) return c.json({ ok: false, error: `Invalid priority. Must be one of: ${VALID_PRIORITIES.join(", ")}` }, 400);
+            task.priority = body.priority;
+          }
           task.updated = new Date().toISOString().split("T")[0];
           return c.json({ ok: true, task });
         }
@@ -390,6 +400,8 @@ export default async function handler(c: Context) {
       }
 
       if (action === "add_task") {
+        if (body.status && !VALID_TASK_STATUSES.includes(body.status)) return c.json({ ok: false, error: `Invalid status. Must be one of: ${VALID_TASK_STATUSES.join(", ")}` }, 400);
+        if (body.priority && !VALID_PRIORITIES.includes(body.priority)) return c.json({ ok: false, error: `Invalid priority. Must be one of: ${VALID_PRIORITIES.join(", ")}` }, 400);
         taskCounter++;
         const id = `t${taskCounter}`;
         const task: Task = {
@@ -407,8 +419,9 @@ export default async function handler(c: Context) {
       }
 
       if (action === "add_memory") {
+        memoryCounter++;
         const memory: Memory = {
-          id: `m${memories.length + 1}_${Date.now()}`,
+          id: `m${memoryCounter}_${Date.now()}`,
           agent: body.agent || "Henry",
           type: body.type || "note",
           content: body.content || "",
@@ -428,7 +441,12 @@ export default async function handler(c: Context) {
         return c.json({
           ok: true,
           mission: missionStatement,
-          agents: agents.map((a) => ({ name: a.name, role: a.role, status: a.status, tasks_active: a.tasks_active })),
+          agents: agents.map((a) => ({
+            name: a.name,
+            role: a.role,
+            status: a.status,
+            tasks_active: tasks.filter((t) => t.assignee === a.name && t.status !== "done").length,
+          })),
           tasks_summary: tasksByStatus,
           tasks_total: tasks.length,
           projects: projects.map((p) => ({ name: p.name, status: p.status, progress: p.progress, deadline: p.deadline })),
