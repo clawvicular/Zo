@@ -30,14 +30,20 @@ let heartbeatInterval: any = null;
 let heartbeatLog: { timestamp: string; summary: string; actions: number }[] = [];
 const HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 
-// Load soul.md at module level
+// Soul.md content — loaded lazily on first use
 let soulContent = "";
-try {
-  const soulPath = new URL("./soul.md", import.meta.url).pathname;
-  soulContent = await Bun.file(soulPath).text();
-} catch {
-  // soul.md not found — use inline fallback
-  soulContent = "You are Henry, the Chief Orchestrator. You ACT, not just chat. You coordinate sub-agents and drive the mission forward 24/7.";
+let soulLoaded = false;
+
+async function loadSoul(): Promise<string> {
+  if (soulLoaded) return soulContent;
+  try {
+    const soulPath = new URL("./soul.md", import.meta.url).pathname;
+    soulContent = await Bun.file(soulPath).text();
+  } catch {
+    soulContent = "You are Henry, the Chief Orchestrator. You ACT, not just chat. You coordinate sub-agents and drive the mission forward 24/7.";
+  }
+  soulLoaded = true;
+  return soulContent;
 }
 
 // Determine the data API base URL (same server)
@@ -132,16 +138,14 @@ async function executeTool(tool: string, params: Record<string, any>): Promise<{
       }
 
       case "update_task": {
+        const updateBody: Record<string, any> = { action: "update_task", task_id: params.task_id };
+        if (params.status !== undefined) updateBody.status = params.status;
+        if (params.assignee !== undefined) updateBody.assignee = params.assignee;
+        if (params.priority !== undefined) updateBody.priority = params.priority;
         const res = await fetch(`${base}/api/data`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "update_task",
-            task_id: params.task_id,
-            status: params.status,
-            assignee: params.assignee,
-            priority: params.priority,
-          }),
+          body: JSON.stringify(updateBody),
         });
         const text = await res.text();
         const data = JSON.parse(text);
@@ -297,15 +301,19 @@ async function executeTool(tool: string, params: Record<string, any>): Promise<{
           const stdout = await new Response(proc.stdout).text();
           const stderr = await new Response(proc.stderr).text();
 
+          let killTimer: any;
           const exitCode = await Promise.race([
             proc.exited,
-            new Promise<number>((_, reject) => setTimeout(() => { proc.kill(); reject(new Error("Timeout")); }, 5000)),
+            new Promise<number>((_, reject) => {
+              killTimer = setTimeout(() => { proc.kill(); reject(new Error("Timeout after 5s")); }, 5000);
+            }),
           ]);
+          clearTimeout(killTimer);
 
           const output = (stdout + (stderr ? "\nSTDERR: " + stderr : "")).slice(0, 2000);
           return { result: output || "(no output)", success: exitCode === 0 };
         } catch (e: any) {
-          return { result: `Error: ${e.message}`, success: false };
+          return { result: `Error: ${e?.message || "unknown"}`, success: false };
         }
       }
 
@@ -321,7 +329,8 @@ async function executeTool(tool: string, params: Record<string, any>): Promise<{
 // Build system prompt with live state
 // ============================================================================
 
-function buildSystemPrompt(systemState: any): string {
+async function buildSystemPrompt(systemState: any): Promise<string> {
+  const soul = await loadSoul();
   const agentList = (systemState?.agents || [])
     .map((a: any) => `  - ${a.name} (${a.role}) — ${a.status}, ${a.tasks_active} active tasks`)
     .join("\n");
@@ -339,7 +348,7 @@ function buildSystemPrompt(systemState: any): string {
     ? Object.entries(systemState.tasks_summary).map(([k, v]) => `${k}: ${v}`).join(", ")
     : "unknown";
 
-  return `${soulContent}
+  return `${soul}
 
 ## Current State
 - Date: ${new Date().toISOString().split("T")[0]}
@@ -484,7 +493,7 @@ async function runHeartbeat(): Promise<void> {
     } catch { /* proceed without state */ }
 
     // 2. Build heartbeat-specific prompt
-    const systemPrompt = buildSystemPrompt(systemState);
+    const systemPrompt = await buildSystemPrompt(systemState);
     const heartbeatPrompt = `This is an AUTONOMOUS HEARTBEAT cycle. You are running on your own — no human asked you to do anything.
 
 Review the current system state above and decide what actions to take. You should:
@@ -509,7 +518,6 @@ Respond with JSON: { "thinking": "...", "actions": [...], "response": "..." }`;
         summary: "Heartbeat skipped — LLM unavailable",
         actions: 0,
       });
-      isProcessing = false;
       return;
     }
 
@@ -557,12 +565,12 @@ Respond with JSON: { "thinking": "...", "actions": [...], "response": "..." }`;
   } catch (e: any) {
     heartbeatLog.push({
       timestamp: new Date().toISOString(),
-      summary: `Heartbeat error: ${e.message}`,
+      summary: `Heartbeat error: ${e?.message || "unknown"}`,
       actions: 0,
     });
+  } finally {
+    isProcessing = false;
   }
-
-  isProcessing = false;
 }
 
 function startHeartbeat(): void {
@@ -571,8 +579,8 @@ function startHeartbeat(): void {
   heartbeatInterval = setInterval(() => {
     runHeartbeat().catch(() => {});
   }, HEARTBEAT_INTERVAL_MS);
-  // Run first heartbeat after a short delay (let server boot)
-  setTimeout(() => runHeartbeat().catch(() => {}), 10000);
+  // Run first heartbeat after 30s delay (let server fully boot)
+  setTimeout(() => runHeartbeat().catch(() => {}), 30000);
 }
 
 function stopHeartbeat(): void {
@@ -665,7 +673,7 @@ export default async function handler(c: Context) {
       } catch { /* proceed without state */ }
 
       // 2. Build system prompt
-      const systemPrompt = buildSystemPrompt(systemState);
+      const systemPrompt = await buildSystemPrompt(systemState);
 
       // 3. Add user message to history
       conversationHistory.push({
@@ -690,7 +698,6 @@ export default async function handler(c: Context) {
           content: fallbackMsg,
           timestamp: new Date().toISOString(),
         });
-        isProcessing = false;
         return c.json({ message: fallbackMsg, actions: [], timestamp: new Date().toISOString() });
       }
 
@@ -761,8 +768,6 @@ export default async function handler(c: Context) {
         }),
       }).catch(() => {});
 
-      isProcessing = false;
-
       return c.json({
         message: finalResponse,
         thinking: parsed.thinking,
@@ -770,8 +775,9 @@ export default async function handler(c: Context) {
         timestamp: new Date().toISOString(),
       });
     } catch (e: any) {
+      return c.json({ error: `Henry error: ${e?.message || "unknown"}` }, 500);
+    } finally {
       isProcessing = false;
-      return c.json({ error: `Henry error: ${e.message}` }, 500);
     }
   }
 

@@ -244,8 +244,10 @@ export default function Henry() {
                       method: "POST",
                       headers: { "Content-Type": "application/json" },
                       body: JSON.stringify({ action: heartbeat.active ? "heartbeat_stop" : "heartbeat_start" }),
-                    }).then(() => {
-                      setHeartbeat((h: any) => h ? { ...h, active: !h.active } : h);
+                    }).then((r) => r.json()).then((data) => {
+                      if (data.ok) {
+                        setHeartbeat((h: any) => h ? { ...h, active: data.heartbeat_active } : h);
+                      }
                     }).catch(() => {});
                   }}
                   style={{ background: "transparent", border: "1px solid #27272a", color: heartbeat.active ? "#ef4444" : "#4ade80", borderRadius: 6, padding: "2px 8px", cursor: "pointer", fontSize: 10 }}
