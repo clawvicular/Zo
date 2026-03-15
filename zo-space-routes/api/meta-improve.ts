@@ -686,6 +686,46 @@ export default async function handler(c: Context) {
         return c.json({ heartbeat });
       }
 
+      if (action === "rollback") {
+        const route = body.route;
+        if (!route) return c.json({ error: "No route provided" }, 400);
+
+        const pageFile = routeToPageFile(route);
+        if (!pageFile) return c.json({ error: `No page file mapping for route: ${route}` }, 400);
+
+        const latestBackup = findLatestBackup(route);
+        if (!latestBackup) return c.json({ error: `No backup found for route: ${route}` }, 404);
+
+        try {
+          const backupContent = await Bun.file(latestBackup).text();
+          const filePath = join(PAGES_DIR, pageFile);
+          await Bun.write(filePath, backupContent);
+
+          // Also revert the in-memory snapshot
+          routeSnapshots[route] = backupContent;
+
+          // Log rollback as a special improvement entry
+          const rollbackImp: Improvement = {
+            id: "rollback_" + Date.now(),
+            name: `Rollback ${route}`,
+            description: `Restored ${pageFile} from backup ${latestBackup}`,
+            category: "reliability",
+            target: route,
+            difficulty: 0,
+            status: "completed",
+            created_at: Date.now(),
+            completed_at: Date.now(),
+            result: `Rolled back ${pageFile} to previous version`,
+            reasoning: "Manual rollback requested",
+          };
+          improvements.push(rollbackImp);
+
+          return c.json({ success: true, message: `Rolled back ${pageFile} from ${latestBackup}`, route, file: pageFile });
+        } catch (e: any) {
+          return c.json({ error: `Rollback failed: ${e?.message || "unknown"}` }, 500);
+        }
+      }
+
       return c.json({ error: "Unknown action: " + action }, 400);
     }
 
