@@ -1,4 +1,87 @@
 import type { Context } from "hono";
+import { existsSync, mkdirSync, readdirSync } from "fs";
+import { join, resolve } from "path";
+
+// ============================================================================
+// Deploy & Backup — write accepted improvements to actual route files
+// ============================================================================
+
+const BACKUP_DIR = "/home/workspace/autoresearch/backups";
+const PAGES_DIR = resolve(import.meta.dir, "../pages");
+
+// Route key (e.g. "/", "/tasks") -> page filename (e.g. "index.tsx", "tasks.tsx")
+function routeToPageFile(routeKey: string): string | null {
+  const mapping: Record<string, string> = {
+    "/": "index.tsx",
+    "/tasks": "tasks.tsx",
+    "/memories": "memories.tsx",
+    "/army": "team.tsx",
+    "/calendar": "calendar.tsx",
+    "/projects": "projects.tsx",
+  };
+  return mapping[routeKey] || null;
+}
+
+// Ensure backup directory exists (henry persistence pattern — write .keep)
+async function ensureBackupDir(): Promise<void> {
+  if (!existsSync(BACKUP_DIR)) {
+    mkdirSync(BACKUP_DIR, { recursive: true });
+    await Bun.write(join(BACKUP_DIR, ".keep"), "");
+  }
+}
+
+// Save a backup of the current file before overwriting
+async function backupRouteFile(routeName: string, filePath: string): Promise<string> {
+  await ensureBackupDir();
+  const timestamp = Date.now();
+  const safeName = routeName.replace(/\//g, "_").replace(/^_/, "") || "index";
+  const backupPath = join(BACKUP_DIR, `${safeName}_${timestamp}.bak`);
+  const currentContent = await Bun.file(filePath).text();
+  await Bun.write(backupPath, currentContent);
+  return backupPath;
+}
+
+// Deploy improved code to the actual page file
+async function deployImprovedCode(routeKey: string, improvedCode: string): Promise<{ deployed: boolean; backupPath?: string; error?: string }> {
+  const pageFile = routeToPageFile(routeKey);
+  if (!pageFile) {
+    return { deployed: false, error: `No page file mapping for route: ${routeKey}` };
+  }
+
+  // SAFETY: only allow pages/*.tsx, NEVER api files
+  if (!pageFile.endsWith(".tsx")) {
+    return { deployed: false, error: "Only .tsx page files can be modified" };
+  }
+
+  const filePath = join(PAGES_DIR, pageFile);
+  if (!existsSync(filePath)) {
+    return { deployed: false, error: `Page file not found: ${pageFile}` };
+  }
+
+  try {
+    const backupPath = await backupRouteFile(routeKey, filePath);
+    await Bun.write(filePath, improvedCode);
+    return { deployed: true, backupPath };
+  } catch (e: any) {
+    return { deployed: false, error: e?.message || "Failed to write file" };
+  }
+}
+
+// Find the most recent backup for a given route
+function findLatestBackup(routeKey: string): string | null {
+  if (!existsSync(BACKUP_DIR)) return null;
+  const safeName = routeKey.replace(/\//g, "_").replace(/^_/, "") || "index";
+  const prefix = `${safeName}_`;
+  try {
+    const files = readdirSync(BACKUP_DIR)
+      .filter(f => f.startsWith(prefix) && f.endsWith(".bak"))
+      .sort()
+      .reverse();
+    return files.length > 0 ? join(BACKUP_DIR, files[0]) : null;
+  } catch {
+    return null;
+  }
+}
 
 // ============================================================================
 // AutoResearch for Mission Control — Real Karpathy-style self-improvement
@@ -463,6 +546,16 @@ async function runAutoCycle(): Promise<{ success: boolean; result: string; exper
     // Update the route snapshot with the improved code (the core Karpathy move)
     if (improvedCode) {
       routeSnapshots[targetKey] = improvedCode;
+
+      // Deploy to actual page file if score > 50
+      if (evalResult.score > 50) {
+        const deployResult = await deployImprovedCode(targetKey, improvedCode);
+        if (deployResult.deployed) {
+          imp.result = (imp.result || "") + ` | DEPLOYED to ${routeToPageFile(targetKey)} (backup: ${deployResult.backupPath})`;
+        } else {
+          imp.result = (imp.result || "") + ` | Deploy skipped: ${deployResult.error}`;
+        }
+      }
     }
   } else {
     imp.status = "failed";
