@@ -224,6 +224,9 @@ export default function AutoResearch() {
               }} />
               {llmConnected ? "Minimax 2.5 Connected" : "LLM Disconnected"}
             </div>
+            <a href="/henry" style={{ padding: "8px 16px", background: "#27272a", borderRadius: 8, color: "#f4f4f5", textDecoration: "none" }}>
+              Henry
+            </a>
             <a href="/" style={{ padding: "8px 16px", background: "#27272a", borderRadius: 8, color: "#f4f4f5", textDecoration: "none" }}>
               Dashboard
             </a>

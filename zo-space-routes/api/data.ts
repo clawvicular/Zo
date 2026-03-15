@@ -406,6 +406,37 @@ export default async function handler(c: Context) {
         return c.json({ ok: true, task });
       }
 
+      if (action === "add_memory") {
+        const memory: Memory = {
+          id: `m${memories.length + 1}_${Date.now()}`,
+          agent: body.agent || "Henry",
+          type: body.type || "note",
+          content: body.content || "",
+          tags: body.tags || [],
+          timestamp: new Date().toISOString(),
+        };
+        memories.unshift(memory);
+        if (memories.length > 500) memories.pop();
+        return c.json({ ok: true, memory });
+      }
+
+      if (action === "get_full_status") {
+        const tasksByStatus: Record<string, number> = {};
+        for (const t of tasks) {
+          tasksByStatus[t.status] = (tasksByStatus[t.status] || 0) + 1;
+        }
+        return c.json({
+          ok: true,
+          mission: missionStatement,
+          agents: agents.map((a) => ({ name: a.name, role: a.role, status: a.status, tasks_active: a.tasks_active })),
+          tasks_summary: tasksByStatus,
+          tasks_total: tasks.length,
+          projects: projects.map((p) => ({ name: p.name, status: p.status, progress: p.progress, deadline: p.deadline })),
+          recent_activities: activities.slice(0, 10).map((a) => ({ agent: a.agent, action: a.action, detail: a.detail, timestamp: a.timestamp })),
+          memories_count: memories.length,
+        });
+      }
+
       return c.json({ ok: false, error: "Unknown action" }, 400);
     } catch (e: any) {
       return c.json({ ok: false, error: e.message }, 500);

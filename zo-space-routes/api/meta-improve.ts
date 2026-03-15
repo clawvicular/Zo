@@ -214,7 +214,8 @@ async function callLLM(systemPrompt: string, userPrompt: string): Promise<string
       return null;
     }
 
-    const data = await res.json();
+    const text = await res.text();
+    const data = JSON.parse(text);
     heartbeat.llm_connected = true;
     heartbeat.error = null;
     return data.choices?.[0]?.message?.content || null;
